@@ -1,8 +1,10 @@
+// server.js
 import express from "express";
 import dotenv from "dotenv";
 import { getDasha } from "./src/astrologyService.js";
 
 dotenv.config();
+
 const app = express();
 app.use(express.json());
 
@@ -17,20 +19,32 @@ app.get("/current-dasha", async (req, res) => {
     const { dob, tob } = req.query;
 
     if (!dob || !tob) {
-      return res.status(400).json({ success: false, error: "Missing dob or tob parameter (use format dob=yyyy-mm-dd&tob=hh:mmm)" });
+      return res.status(400).json({
+        success: false,
+        error: "Missing dob or tob parameter (use format: dob=YYYY-MM-DD&tob=HH:MM)"
+      });
     }
 
-    const result = await getDasha(dob, tob);
-    return res.json({ success: true, ...result });
+    // IMPORTANT FIX → Correct way to call getDasha()
+    const result = await getDasha({ dob, tob });
+
+    return res.json({
+      success: true,
+      dob,
+      tob,
+      raw: result
+    });
+
   } catch (error) {
     return res.status(500).json({
       success: false,
-      error: error.message || "Server error",
+      error: error.message || "Server error"
     });
   }
 });
 
+// Server Start
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`Server running on port ${PORT}`)
+);
