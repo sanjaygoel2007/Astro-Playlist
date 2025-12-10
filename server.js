@@ -1,7 +1,7 @@
 // server.js
 import express from "express";
 import dotenv from "dotenv";
-import { getCurrentDasha } from "./astrologyService.js";
+import { getCurrentDasha } from "./src/astrologyService.js";
 
 dotenv.config();
 
