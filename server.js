@@ -1,43 +1,38 @@
-// server.js
 import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
-import { getCurrentDasha } from "./src/astrologyService.js";
+import { getDasha } from "./astrologyService.js";
 
 dotenv.config();
-
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(cors());
+app.use(express.json());
 
+// Root check
 app.get("/", (req, res) => {
-  res.send("Astro playlist backend is running ✅");
+  res.send("Astro Playlist backend is running ⚡");
 });
 
-app.get("/test-dasha", async (req, res) => {
+// MAIN ROUTE → /current-dasha
+app.get("/current-dasha", async (req, res) => {
   try {
     const { dob, tob } = req.query;
 
     if (!dob || !tob) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Please pass dob and tob query params" });
+      return res.status(400).json({ success: false, error: "dob or tob missing" });
     }
 
-    const raw = await getCurrentDasha({ dob, tob });
-
-    return res.json({
-      success: true,
-      dob,
-      tob,
-      raw, // अभी पूरा raw response भेज रहे हैं
+    const result = await getDasha(dob, tob);
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Server error",
     });
-  } catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ success: false, error: err.message || "Unknown error" });
   }
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
