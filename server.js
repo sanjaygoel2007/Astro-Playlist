@@ -7,12 +7,13 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Simple health check
+// Home route
 app.get('/', (req, res) => {
   res.send('Astro Playlist backend is running ✅');
 });
 
-// Test route: /test-dasha?dob=1990-05-10&tob=14:30
+// Test route for Mahadasha & Antardasha
+// Example: /test-dasha?dob=1990-05-10&tob=14:30
 app.get('/test-dasha', async (req, res) => {
   try {
     const dob = req.query.dob || '1990-05-10';
@@ -28,8 +29,9 @@ app.get('/test-dasha', async (req, res) => {
       antardasha: result.antardasha,
       antardashaEnd: result.antardashaEnd,
     });
+
   } catch (err) {
-    console.error(err);
+    console.error('Error:', err);
     res.status(500).json({
       success: false,
       error: err.message,
@@ -38,5 +40,5 @@ app.get('/test-dasha', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
