@@ -60,5 +60,4 @@ export async function getDasha({ dob, tob }) {
   const data = await res.json();
   // फिलहाल पूरा raw data ही return कर रहे हैं
   return data;
-  export { getDasha };
 }
