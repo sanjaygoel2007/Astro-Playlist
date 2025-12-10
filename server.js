@@ -4,158 +4,85 @@ import dotenv from "dotenv";
 import { getDasha } from "./src/astrologyService.js";
 
 dotenv.config();
-
 const app = express();
 app.use(express.json());
 
-// Root check
+// Root route
 app.get("/", (req, res) => {
   res.send("Astro Playlist backend is running ⚡");
 });
 
-/**
- * Recursively traverse any JSON value and collect all
- * objects that look like a dasha interval:
- *  - have some "start" field (start_date / start_time / start)
- *  - have some "end" field (end_date / end_time / end)
- *  - have some "lord/planet" info
- */
-function collectIntervals(node, acc = []) {
-  if (!node) return acc;
-
-  if (Array.isArray(node)) {
-    for (const item of node) collectIntervals(item, acc);
-    return acc;
-  }
-
-  if (typeof node === "object") {
-    const keys = Object.keys(node);
-
-    const startKey = keys.find((k) => k.toLowerCase().includes("start"));
-    const endKey = keys.find((k) => k.toLowerCase().includes("end"));
-
-    // planet / lord names
-    const mahaKey = keys.find((k) =>
-      k.toLowerCase().match(/mah.*dasa.*lord|maha.*dasha.*lord|mah_dasa_lord/)
-    );
-    const antarKey = keys.find((k) =>
-      k.toLowerCase().match(/antar.*dasa.*lord|anthar.*dasa.*lord|antar_dasa_lord/)
-    );
-    const genericPlanetKey = keys.find((k) =>
-      k.toLowerCase().match(/planet|lord/)
-    );
-
-    if (startKey && endKey) {
-      const startRaw = node[startKey];
-      const endRaw = node[endKey];
-
-      let start = typeof startRaw === "string" ? startRaw : null;
-      let end = typeof endRaw === "string" ? endRaw : null;
-
-      if (start && !start.includes("T")) start = start.replace(" ", "T");
-      if (end && !end.includes("T")) end = end.replace(" ", "T");
-
-      const startDate = start ? new Date(start) : null;
-      const endDate = end ? new Date(end) : null;
-
-      const mahaName = mahaKey ? node[mahaKey] : undefined;
-      const antarName = antarKey ? node[antarKey] : undefined;
-      const genericName = genericPlanetKey ? node[genericPlanetKey] : undefined;
-
-      acc.push({
-        raw: node,
-        start,
-        end,
-        startDate,
-        endDate,
-        mahadasha: mahaName || undefined,
-        antardasha: antarName || undefined,
-        name: genericName || undefined,
-      });
-    }
-
-    // go deeper
-    for (const v of Object.values(node)) {
-      collectIntervals(v, acc);
-    }
-
-    return acc;
-  }
-
-  return acc;
+// Utility: check if date is within range
+function isBetween(date, start, end) {
+  const d = new Date(date);
+  return d >= new Date(start) && d <= new Date(end);
 }
 
-/**
- * Given raw API response, return current dasha:
- *  - remove all intervals whose end < now
- *  - sort remaining by startDate
- *  - pick the first one
- */
-function extractCurrentFromRaw(raw) {
-  const intervals = collectIntervals(raw, []);
-
-  if (!intervals.length) {
-    throw new Error("No dasha intervals found in API response");
-  }
-
-  const now = new Date();
-
-  const futureOrCurrent = intervals.filter(
-    (i) =>
-      i.startDate instanceof Date &&
-      !isNaN(i.startDate) &&
-      i.endDate instanceof Date &&
-      !isNaN(i.endDate) &&
-      i.endDate >= now
-  );
-
-  const candidates = futureOrCurrent.length ? futureOrCurrent : intervals;
-
-  candidates.sort((a, b) => a.startDate - b.startDate);
-
-  const current = candidates[0];
-
-  // best-effort: mahadasha & antardasha names
-  const mahadasha =
-    current.mahadasha ||
-    current.name ||
-    current.raw?.mah_dasa_lord ||
-    current.raw?.mah_dasha_lord ||
-    current.raw?.lord ||
-    null;
-
-  const antardasha =
-    current.antardasha ||
-    current.raw?.antar_dasa_lord ||
-    current.raw?.antar_dasha_lord ||
-    null;
-
-  return {
-    mahadasha,
-    antardasha,
-    start: current.start,
-    end: current.end,
-  };
-}
-
-// MAIN ROUTE → /current-dasha
+// Main route
 app.get("/current-dasha", async (req, res) => {
   try {
     const { dob, tob } = req.query;
-
     if (!dob || !tob) {
       return res.status(400).json({
         success: false,
-        error:
-          "Missing dob or tob parameter (use format: dob=YYYY-MM-DD&tob=HH:MM)",
+        error: "Missing dob or tob (use format dob=YYYY-MM-DD&tob=HH:MM)",
       });
     }
 
-    // 1) FreeAstrologyAPI se full mahadasha+antardasha list
+    // Fetch all maha + antar dashas
     const raw = await getDasha({ dob, tob });
+    const list = raw?.output || [];
 
-    // 2) Purani dashaa hatao, current+future me se sabse pehli lo
-    const current = extractCurrentFromRaw(raw);
+    if (!Array.isArray(list) || !list.length) {
+      throw new Error("Invalid API format or empty dasha list");
+    }
+
+    const now = new Date();
+    let current = null;
+
+    // Loop through each Mahadasha
+    for (const maha of list) {
+      const mahaStart = maha.start_time || maha.start_date;
+      const mahaEnd = maha.end_time || maha.end_date;
+
+      // Check if current date is inside this Mahadasha
+      if (isBetween(now, mahaStart, mahaEnd)) {
+        // Go inside its Antardasha list
+        const antars = maha.antar_dasha || maha.antardasha || [];
+
+        for (const antar of antars) {
+          const antarStart = antar.start_time || antar.start_date;
+          const antarEnd = antar.end_time || antar.end_date;
+
+          if (isBetween(now, antarStart, antarEnd)) {
+            current = {
+              mahadasha: maha.lord || maha.mah_dasa_lord || maha.mah_dasha_lord,
+              antardasha:
+                antar.lord ||
+                antar.antar_dasa_lord ||
+                antar.antar_dasha_lord,
+              start: antarStart,
+              end: antarEnd,
+            };
+            break;
+          }
+        }
+
+        // अगर antardasha में नहीं मिला तो सिर्फ mahadasha return कर दो
+        if (!current) {
+          current = {
+            mahadasha: maha.lord || maha.mah_dasa_lord,
+            start: mahaStart,
+            end: mahaEnd,
+          };
+        }
+        break;
+      }
+    }
+
+    if (!current) {
+      throw new Error("No matching dasha found for current date");
+    }
 
     return res.json({
       success: true,
