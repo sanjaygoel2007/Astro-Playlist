@@ -1,49 +1,63 @@
+// astrologyService.js
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 
 dotenv.config();
 
-// use env variables
-const LATITUDE = process.env.LATITUDE;
-const LONGITUDE = process.env.LONGITUDE;
-const TIMEZONE = process.env.TIMEZONE;
-const API_KEY = process.env.ASTRO_API_KEY;
+const ASTRO_API_KEY = process.env.ASTRO_API_KEY;
+const LAT = 28.7041;
+const LON = 77.1025;
+const TZ = 5.5;
 
-export async function getCurrentDasha() {
-  try {
-    const url =
-      "https://json.freeastrologyapi.com/vimsottari/maha-dasas-and-antar-dasas";
+// dob = "YYYY-MM-DD", tob = "HH:MM"
+function parseDobTob(dob, tob) {
+  const [year, month, date] = dob.split("-").map(Number);
+  const [hours, minutes] = tob.split(":").map(Number);
+  const seconds = 0;
+  return { year, month, date, hours, minutes, seconds };
+}
 
-    const body = {
-      year: 1990,
-      month: 5,
-      date: 10,
-      hours: 8,
-      minutes: 30,
-      seconds: 0,
-      latitude: Number(LATITUDE),
-      longitude: Number(LONGITUDE),
-      timezone: Number(TIMEZONE),
-      config: {
-        observation_point: "topocentric",
-        ayanamsha: "lahiri",
-      }
-    };
+export async function getCurrentDasha({ dob, tob }) {
+  if (!ASTRO_API_KEY) {
+    throw new Error("ASTRO_API_KEY missing in environment");
+  }
 
-    const response = await fetch(url, {
+  const { year, month, date, hours, minutes, seconds } = parseDobTob(dob, tob);
+
+  const payload = {
+    year,
+    month,
+    date,
+    hours,
+    minutes,
+    seconds,
+    latitude: LAT,
+    longitude: LON,
+    timezone: TZ,
+    config: {
+      observation_point: "topocentric",
+      ayanamsha: "lahiri",
+    },
+  };
+
+  const res = await fetch(
+    "https://json.freeastrologyapi.com/vimsottari/maha-dasas-and-antar-dasas",
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": API_KEY
+        "x-api-key": ASTRO_API_KEY,
       },
-      body: JSON.stringify(body)
-    });
+      body: JSON.stringify(payload),
+    }
+  );
 
-    const result = await response.json();
-    return result;
-
-  } catch (err) {
-    console.error("Error fetching dasha:", err);
-    return { success: false, error: err.message };
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Astro API error ${res.status}: ${text}`);
   }
+
+  const data = await res.json();
+  // फिलहाल पूरा raw data ही return कर रहे हैं
+  return data;
 }
