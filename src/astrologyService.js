@@ -17,7 +17,7 @@ function parseDobTob(dob, tob) {
   return { year, month, date, hours, minutes, seconds };
 }
 
-export async function getCurrentDasha({ dob, tob }) {
+export async function getDasha({ dob, tob }) {
   if (!ASTRO_API_KEY) {
     throw new Error("ASTRO_API_KEY missing in environment");
   }
@@ -60,4 +60,5 @@ export async function getCurrentDasha({ dob, tob }) {
   const data = await res.json();
   // फिलहाल पूरा raw data ही return कर रहे हैं
   return data;
+  export { getDasha };
 }
