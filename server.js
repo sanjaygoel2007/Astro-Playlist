@@ -17,7 +17,7 @@ app.get("/current-dasha", async (req, res) => {
     const { dob, tob } = req.query;
 
     if (!dob || !tob) {
-      return res.status(400).json({ success: false, error: "dob or tob missing" });
+      return res.status(400).json({ success: false, error: "Missing dob or tob parameter (use format dob=yyyy-mm-dd&tob=hh:mmm)" });
     }
 
     const result = await getDasha(dob, tob);
