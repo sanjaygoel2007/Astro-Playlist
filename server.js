@@ -1,44 +1,43 @@
-import express from 'express';
-import { getCurrentDasha } from './src/astrologyService.js';
-import dotenv from 'dotenv';
+// server.js
+import express from "express";
+import dotenv from "dotenv";
+import { getCurrentDasha } from "./astrologyService.js";
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// Home route
-app.get('/', (req, res) => {
-  res.send('Astro Playlist backend is running ✅');
+app.get("/", (req, res) => {
+  res.send("Astro playlist backend is running ✅");
 });
 
-// Test route for Mahadasha & Antardasha
-// Example: /test-dasha?dob=1990-05-10&tob=14:30
-app.get('/test-dasha', async (req, res) => {
+app.get("/test-dasha", async (req, res) => {
   try {
-    const dob = req.query.dob || '1990-05-10';
-    const tob = req.query.tob || '14:30';
+    const { dob, tob } = req.query;
 
-    const result = await getCurrentDasha({ dob, tob });
+    if (!dob || !tob) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Please pass dob and tob query params" });
+    }
 
-    res.json({
+    const raw = await getCurrentDasha({ dob, tob });
+
+    return res.json({
       success: true,
       dob,
       tob,
-      mahadasha: result.mahadasha,
-      antardasha: result.antardasha,
-      antardashaEnd: result.antardashaEnd,
+      raw, // अभी पूरा raw response भेज रहे हैं
     });
-
   } catch (err) {
-    console.error('Error:', err);
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+    console.error(err);
+    return res
+      .status(500)
+      .json({ success: false, error: err.message || "Unknown error" });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
