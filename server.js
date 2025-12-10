@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { getDasha } from "./astrologyService.js";
+import { getDasha } from "./src/astrologyService.js";
 
 dotenv.config();
 const app = express();
