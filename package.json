@@ -1,0 +1,14 @@
+{
+  "name": "astro-playlist",
+  "version": "1.0.0",
+  "description": "FreeAstrologyAPI + Dasha test project",
+  "main": "testDasha.js",
+  "type": "module",
+  "scripts": {
+    "test": "node testDasha.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  }
+}
