@@ -1,6 +1,6 @@
 // server.js (final improved)
 // Requires package.json "type":"module"
-// Env required: DATABASE_URL, ASTRO_API_KEY (optional), ADMIN_SQL_KEY (optional)
+// Env required: DATABASE_URL, ASTRO_API_KEY, ADMIN_SQL_KEY
 // Optional: PORT, NODE_ENV
 
 import express from "express";
@@ -26,24 +26,22 @@ if (!DATABASE_URL) {
   process.exit(1);
 }
 if (!ASTRO_API_KEY) {
-  console.warn("Warning: ASTRO_API_KEY not set — /current-dasha will fail without it.");
+  console.warn("Warning: ASTRO_API_KEY not set — /current-dasha may fail.");
 }
 if (!ADMIN_SQL_KEY) {
-  console.warn("Warning: ADMIN_SQL_KEY not set — /run-sql endpoint will be disabled.");
+  console.warn("Warning: ADMIN_SQL_KEY not set — /run-sql will be disabled.");
 }
 
-// Pool config - Render/Postgres typically needs ssl.rejectUnauthorized=false
+// PostgreSQL Pool
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: (NODE_ENV === "production") ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000
+  ssl: NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 10
 });
 
+// Create table if not exists
 async function ensureSchema() {
-  // create users table if not exists
-  const create = `
+  const sql = `
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -58,183 +56,202 @@ async function ensureSchema() {
   `;
   const client = await pool.connect();
   try {
-    await client.query(create);
-    console.log("DB: users table is ready");
+    await client.query(sql);
+    console.log("DB: users table ready.");
   } finally {
     client.release();
   }
 }
 
-(async () => {
-  try {
-    await ensureSchema();
-  } catch (err) {
-    console.error("Schema init error:", err);
-    // don't crash — still allow server to start, but DB may fail later
-  }
-})();
+ensureSchema().catch(err => console.error("Schema init error:", err));
 
 const app = express();
 
-// security + basic limits
+// Security
 app.use(helmet());
-app.use(cors()); // restrict origin in production if needed
+app.use(cors());
 app.use(express.json());
 app.set("trust proxy", 1);
 
-const limiter = rateLimit({
-  windowMs: 30 * 1000, // 30 seconds
-  max: 30 // requests per window per IP
-});
-app.use(limiter);
+// Rate limit
+app.use(rateLimit({
+  windowMs: 30 * 1000,
+  max: 30
+}));
 
-/** root */
+// Root
 app.get("/", (req, res) => {
   res.send("Astro Playlist backend is running ⚡");
 });
 
-/**
- * /current-dasha
- * Query: dob=YYYY-MM-DD&tob=HH:MM
- */
+
+// --------------------------------------------------------------------
+// CURRENT DASHA
+// --------------------------------------------------------------------
 app.get("/current-dasha", async (req, res) => {
   try {
     const { dob, tob } = req.query;
+
     if (!dob || !tob) {
       return res.status(400).json({
         success: false,
-        error: "Missing dob or tob parameter (use format dob=yyyy-mm-dd&tob=hh:mm)"
+        error: "Missing dob or tob. Format: dob=YYYY-MM-DD&tob=HH:MM"
       });
     }
 
-    // call astrology service
     const raw = await getDasha({ dob, tob });
-
-    const now = new Date();
-
-    // unwrap potential nested responses
     let parsed = raw;
-    if (typeof raw === "object" && raw.output && typeof raw.output === "string") {
-      try { parsed = JSON.parse(raw.output); } catch (e) { /* ignore */ }
+
+    if (raw?.output) {
+      try { parsed = JSON.parse(raw.output); } catch {}
     }
     if (typeof parsed === "string") {
-      try { parsed = JSON.parse(parsed); } catch (e) { /* ignore */ }
+      try { parsed = JSON.parse(parsed); } catch {}
     }
 
+    const now = new Date();
     let mahaResult = null;
     let antarResult = null;
 
     try {
-      const mahaNames = Object.keys(parsed || {});
-      for (const m of mahaNames) {
+      const mahaList = Object.keys(parsed || {});
+
+      for (const m of mahaList) {
         const mahaObj = parsed[m];
-        let mahaStart = null;
-        let mahaEnd = null;
+        if (!mahaObj) continue;
 
-        if (mahaObj && typeof mahaObj === "object" && mahaObj[m] && mahaObj[m].start_time) {
-          mahaStart = new Date(mahaObj[m].start_time);
-          mahaEnd = new Date(mahaObj[m].end_time);
-        } else if (mahaObj && mahaObj.start_time) {
-          mahaStart = new Date(mahaObj.start_time);
-          mahaEnd = new Date(mahaObj.end_time);
-        }
+        let mStart = mahaObj[m]?.start_time ? new Date(mahaObj[m].start_time) :
+                   mahaObj?.start_time ? new Date(mahaObj.start_time) : null;
 
-        if (mahaStart && mahaEnd && now >= mahaStart && now < mahaEnd) {
-          mahaResult = { name: m, start_time: mahaStart.toISOString(), end_time: mahaEnd.toISOString() };
+        let mEnd = mahaObj[m]?.end_time ? new Date(mahaObj[m].end_time) :
+                 mahaObj?.end_time ? new Date(mahaObj.end_time) : null;
 
-          const subNames = Object.keys(mahaObj || {});
+        if (!mStart || !mEnd) continue;
+
+        if (now >= mStart && now < mEnd) {
+          // Found current MAHADASHA
+          mahaResult = {
+            name: m,
+            start_time: mStart.toISOString(),
+            end_time: mEnd.toISOString()
+          };
+
+          // Find ANTARDASHA
+          const subNames = Object.keys(mahaObj);
           for (const s of subNames) {
-            if (!mahaObj[s] || !mahaObj[s].start_time) continue;
-            const sStart = new Date(mahaObj[s].start_time);
-            const sEnd = new Date(mahaObj[s].end_time);
+            const sObj = mahaObj[s];
+            if (!sObj?.start_time) continue;
+
+            const sStart = new Date(sObj.start_time);
+            const sEnd = new Date(sObj.end_time);
+
             if (now >= sStart && now < sEnd) {
-              antarResult = { name: s, start_time: sStart.toISOString(), end_time: sEnd.toISOString() };
+              antarResult = {
+                name: s,
+                start_time: sStart.toISOString(),
+                end_time: sEnd.toISOString()
+              };
               break;
             }
           }
 
+          // fallback if none matched
           if (!antarResult) {
             for (const s of subNames) {
-              if (mahaObj[s] && mahaObj[s].start_time) {
-                const sStart = new Date(mahaObj[s].start_time);
-                const sEnd = new Date(mahaObj[s].end_time);
-                antarResult = { name: s, start_time: sStart.toISOString(), end_time: sEnd.toISOString() };
-                break;
-              }
+              const sObj = mahaObj[s];
+              if (!sObj?.start_time) continue;
+
+              const sStart = new Date(sObj.start_time);
+              const sEnd = new Date(sObj.end_time);
+              antarResult = {
+                name: s,
+                start_time: sStart.toISOString(),
+                end_time: sEnd.toISOString()
+              };
+              break;
             }
           }
+
           break;
         }
       }
     } catch (e) {
-      console.warn("Parsing error in /current-dasha:", e);
+      console.warn("Dasha parse error:", e);
     }
 
     if (!mahaResult) {
-      return res.json({ success: true, message: "Could not auto-detect current mahadasha from API response. Returning raw.", raw: parsed });
+      return res.json({ success: true, message: "Could not detect current dasha.", raw: parsed });
     }
 
     return res.json({
       success: true,
       dob,
       tob,
-      mahandantar: {
-        mahadasha: mahaResult,
-        antardasha: antarResult
-      },
+      mahandantar: { mahadasha: mahaResult, antardasha: antarResult },
       raw: parsed
     });
 
-  } catch (error) {
-    console.error("current-dasha error:", error);
-    return res.status(500).json({ success: false, error: error.message || "Server error" });
+  } catch (err) {
+    console.error("current-dasha error:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/**
- * Simple SQL admin UI
- * only enabled when ADMIN_SQL_KEY is set
- */
+
+// --------------------------------------------------------------------
+// SQL WEB PANEL
+// --------------------------------------------------------------------
 app.get("/sql", (req, res) => {
   if (!ADMIN_SQL_KEY) {
-    return res.status(403).send("SQL admin disabled (ADMIN_SQL_KEY not configured).");
+    return res.status(403).send("SQL panel disabled. Set ADMIN_SQL_KEY env.");
   }
+
   res.send(`
     <h2>Astro SQL Admin Panel</h2>
-    <p>Use this panel carefully. It runs SQL on your Render database.</p>
     <form onsubmit="runSQL(event)">
-      <textarea id="query" name="query" rows="12" cols="90" placeholder="Write SQL here..."></textarea><br/>
-      <input id="key" placeholder="Admin key" style="width:400px"/><br/><br/>
+      <textarea id="query" rows="10" cols="90"></textarea><br><br>
+      <input id="key" placeholder="Admin key" style="width:300px;"><br><br>
       <button type="submit">Run SQL</button>
     </form>
-    <pre id="output" style="background:#f5f5f5;padding:10px;margin-top:12px;"></pre>
+    <pre id="output" style="background:#eee;padding:15px;margin-top:10px;"></pre>
     <script>
       async function runSQL(e){
         e.preventDefault();
-        const query = document.getElementById('query').value;
-        const key = document.getElementById('key').value;
-        const res = await fetch('/run-sql', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
+        const query = document.getElementById("query").value;
+        const key = document.getElementById("key").value;
+
+        const res = await fetch("/run-sql", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
           body: JSON.stringify({ query, key })
         });
-        const data = await res.json();
-        document.getElementById('output').innerText = JSON.stringify(data, null, 2);
+
+        const out = await res.json();
+        document.getElementById("output").innerText =
+          JSON.stringify(out, null, 2);
       }
     </script>
   `);
 });
 
-/**
- * Run arbitrary SQL (POST /run-sql)
- * Body: { query: "SQL HERE", key: "ADMIN_SQL_KEY" }
- * Protected by ADMIN_SQL_KEY env
- */
+
+// --------------------------------------------------------------------
+// RUN SQL
+// --------------------------------------------------------------------
 app.post("/run-sql", async (req, res) => {
-  if (!ADMIN_SQL_KEY) return res.status(403).json({ success: false, error: "Not enabled" });
+  if (!ADMIN_SQL_KEY) {
+    return res.status(403).json({ success: false, error: "SQL disabled." });
+  }
+
   const { query, key } = req.body;
-  if (!query) return res.status(400).json({ success: false, error: "SQL query missing" });
-  if (!key || key !== ADMIN_SQL_KEY) return res.status(401).json({ success: false, error: "Invalid admin key" });
+
+  if (key !== ADMIN_SQL_KEY) {
+    return res.status(401).json({ success: false, error: "Invalid admin key" });
+  }
+
+  if (!query) {
+    return res.status(400).json({ success: false, error: "Missing SQL query" });
+  }
 
   let client;
   try {
@@ -244,60 +261,67 @@ app.post("/run-sql", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   } finally {
-    if (client) client.release();
+    client?.release();
   }
 });
 
-/**
- * Save submission
- * POST /submit
- * body: { name, dob, tob, place, problem, mobile, language }
- */
+
+// --------------------------------------------------------------------
+// SUBMIT USER FORM DATA
+// --------------------------------------------------------------------
 app.post("/submit", async (req, res) => {
   try {
     const { name, dob, tob, place, problem, mobile, language } = req.body;
+
     if (!name || !dob || !tob) {
-      return res.status(400).json({ success: false, error: "Missing required fields: name,dob,tob" });
+      return res.status(400).json({ success: false, error: "Missing name, dob or tob" });
     }
 
-    const insertSQL = `
+    const sql = `
       INSERT INTO users (name, dob, tob, place, problem, mobile, language)
       VALUES ($1,$2,$3,$4,$5,$6,$7)
-      RETURNING id, created_at;
+      RETURNING *;
     `;
 
     const client = await pool.connect();
-    try {
-      const result = await client.query(insertSQL, [name, dob, tob, place || null, problem || null, mobile || null, language || null]);
-      const inserted = result.rows[0] || null;
-      return res.json({ success: true, inserted });
-    } finally {
-      client.release();
-    }
+    const result = await client.query(sql, [
+      name,
+      dob,
+      tob,
+      place || null,
+      problem || null,
+      mobile || null,
+      language || null
+    ]);
+    client.release();
+
+    return res.json({ success: true, data: result.rows[0] });
+
   } catch (err) {
     console.error("submit error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/**
- * Quick endpoint to ensure DATABASE is reachable
- */
+
+// --------------------------------------------------------------------
+// DB CHECK
+// --------------------------------------------------------------------
 app.get("/db-check", async (req, res) => {
-  let client;
   try {
-    client = await pool.connect();
-    const q = await client.query("SELECT NOW() as now");
-    return res.json({ success: true, now: q.rows[0].now });
+    const client = await pool.connect();
+    const result = await client.query("SELECT NOW() as now");
+    client.release();
+
+    return res.json({ success: true, now: result.rows[0].now });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
-  } finally {
-    if (client) client && client.release();
   }
 });
 
-// Start server
+
+// --------------------------------------------------------------------
+// START SERVER
+// --------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
