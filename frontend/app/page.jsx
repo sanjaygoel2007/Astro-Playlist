@@ -1,5 +1,6 @@
-import "../globals.css";
+import "./globals.css";         // <-- change here
 import dynamic from "next/dynamic";
+
 const Form = dynamic(() => import("../components/Form"), { ssr:false });
 
 export default function Page(){
