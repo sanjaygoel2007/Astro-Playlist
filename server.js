@@ -1,388 +1,261 @@
-// server.js
+// server.js (updated)
+// Assumes: package.json "type":"module"
+// Ensure env: ASTRO_API_KEY, DATABASE_URL, PORT (optional)
+
 import express from "express";
 import dotenv from "dotenv";
-import { getDasha } from "./src/astrologyService.js";
+import cors from "cors";
 import pkg from "pg";
+const { Client } = pkg;
+import { getDasha } from "./src/astrologyService.js";
 
 dotenv.config();
 
-const { Pool } = pkg;
 const app = express();
-
-// Body parsers (HTML form + JSON)
-app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 app.use(express.json());
 
-// ---------- DB SETUP (Postgres) ----------
-
-const connectionString = process.env.DATABASE_URL;
-let pool = null;
-let tableReady = false;
-
-if (connectionString) {
-  pool = new Pool({
-    connectionString,
-    ssl: { rejectUnauthorized: false },
+// Helper function to create pg client
+function makeClient() {
+  return new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
   });
 }
 
-async function ensureTable() {
-  if (!pool || tableReady) return;
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS playlist_requests (
-      id SERIAL PRIMARY KEY,
-      name TEXT,
-      dob DATE,
-      tob TEXT,
-      place TEXT,
-      problem TEXT,
-      lang TEXT,
-      mahadasha TEXT,
-      antardasha TEXT,
-      antardasha_end TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  tableReady = true;
-}
-
-async function saveRequest(row) {
-  if (!pool) {
-    console.log("No DATABASE_URL set, skipping DB save:", row);
-    return { id: null };
-  }
-  await ensureTable();
-  const result = await pool.query(
-    `INSERT INTO playlist_requests
-      (name, dob, tob, place, problem, lang, mahadasha, antardasha, antardasha_end)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     RETURNING id`,
-    [
-      row.name,
-      row.dob,
-      row.tob,
-      row.place,
-      row.problem,
-      row.lang,
-      row.mahadasha,
-      row.antardasha,
-      row.antardasha_end,
-    ]
-  );
-  return result.rows[0];
-}
-
-// ---------- DASHA HELPERS ----------
-
-function parseApiOutput(data) {
-  if (!data) return null;
-
-  let obj = null;
-  if (typeof data === "string") {
-    try {
-      obj = JSON.parse(data);
-    } catch {
-      return null;
-    }
-  } else if (data.output && typeof data.output === "string") {
-    try {
-      obj = JSON.parse(data.output);
-    } catch {
-      return null;
-    }
-  } else if (data.output && typeof data.output === "object") {
-    obj = data.output;
-  } else if (typeof data === "object") {
-    obj = data;
-  }
-  return obj;
-}
-
-function toDateUTC(s) {
-  if (!s) return null;
-  const iso = s.replace(" ", "T") + "Z";
-  const d = new Date(iso);
-  return isNaN(d) ? null : d;
-}
-
-async function computeCurrentDasha(dob, tob) {
-  const raw = await getDasha({ dob, tob });
-  const parsed = parseApiOutput(raw);
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Invalid API response format or empty dasha list");
-  }
-
-  const now = new Date();
-
-  const mahaList = Object.keys(parsed).map((mahaName) => {
-    const inner = parsed[mahaName];
-    const mahaStartStr = inner && inner[mahaName] && inner[mahaName].start_time;
-    const mahaStart = toDateUTC(mahaStartStr);
-
-    let mahaEnd = null;
-    const antars = [];
-    for (const antarName of Object.keys(inner || {})) {
-      const it = inner[antarName];
-      const s = toDateUTC(it.start_time);
-      const e = toDateUTC(it.end_time);
-      antars.push({ name: antarName, start: s, end: e });
-      if (e && (!mahaEnd || e > mahaEnd)) mahaEnd = e;
-    }
-
-    antars.sort((a, b) =>
-      a.start && b.start ? a.start - b.start : 0
-    );
-
-    return { mahaName, mahaStart, mahaEnd, antardashas: antars };
-  });
-
-  const futureMahas = mahaList.filter((m) => m.mahaEnd && m.mahaEnd >= now);
-  if (!futureMahas.length) {
-    throw new Error("No dasha intervals found in API response");
-  }
-
-  futureMahas.sort((a, b) => {
-    if (!a.mahaStart) return 1;
-    if (!b.mahaStart) return -1;
-    return a.mahaStart - b.mahaStart;
-  });
-
-  const pickedMaha = futureMahas[0];
-
-  const curAntar =
-    pickedMaha.antardashas.find((ant) => ant.end && ant.end >= now) ||
-    pickedMaha.antardashas[0];
-
-  if (!curAntar) {
-    throw new Error("No antardasha intervals found in selected mahadasha");
-  }
-
-  return {
-    mahadasha: {
-      name: pickedMaha.mahaName,
-      start_time: pickedMaha.mahaStart,
-      end_time: pickedMaha.mahaEnd,
-    },
-    antardasha: {
-      name: curAntar.name,
-      start_time: curAntar.start,
-      end_time: curAntar.end,
-    },
-    debug: {
-      maha_count: mahaList.length,
-    },
-  };
-}
-
-// ---------- ROUTES ----------
-
+/**
+ * Basic root healthcheck
+ */
 app.get("/", (req, res) => {
   res.send("Astro Playlist backend is running ⚡");
 });
 
-// JSON API for other systems
+/**
+ * MAIN ROUTE → /current-dasha
+ * Query params: dob=YYYY-MM-DD&tob=HH:MM
+ * Returns processed result (mahadasha + antardasha) and original raw API data.
+ */
 app.get("/current-dasha", async (req, res) => {
   try {
     const { dob, tob } = req.query;
+
     if (!dob || !tob) {
       return res.status(400).json({
         success: false,
-        error: "Missing dob or tob (use dob=YYYY-MM-DD&tob=HH:MM)",
+        error: "Missing dob or tob parameter (use format dob=yyyy-mm-dd&tob=hh:mm)"
       });
     }
 
-    const result = await computeCurrentDasha(dob, tob);
-    res.json({
+    // Call your astrology service
+    const raw = await getDasha({ dob, tob });
+
+    // Try to find current maha & antar for "today" (server time)
+    // If API returns nested structure where keys are mahadasha names and values are maps of sub-dashas,
+    // then we will parse and pick the maha whose start<=now<end and the first antar inside it that contains now.
+    const now = new Date();
+
+    // If API returns object with {"statusCode":200,"output":"{...json...}"} (stringified),
+    // attempt to unwrap.
+    let parsed = raw;
+    if (typeof raw === "object" && raw.output && typeof raw.output === "string") {
+      try {
+        parsed = JSON.parse(raw.output);
+      } catch (e) {
+        // leave parsed = raw
+      }
+    }
+
+    // If parsed is a string that itself is JSON:
+    if (typeof parsed === "string") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (e) { /* ignore */ }
+    }
+
+    // parsed is expected to be an object with top-level mahadashas
+    let mahaResult = null;
+    let antarResult = null;
+    try {
+      // parsed might be { "Moon": {...}, "Mars": {...}, ... } where for each maha there are sub objects.
+      const mahaNames = Object.keys(parsed || {});
+      for (const m of mahaNames) {
+        const mahaObj = parsed[m];
+        // mahaObj might contain a property for the maha itself (e.g., mahaObj[m] with start_time/end_time)
+        // or the API might be differently structured. We'll attempt several ways.
+        let mahaStart = null;
+        let mahaEnd = null;
+
+        // If mahaObj contains property with same name:
+        if (mahaObj && typeof mahaObj === "object" && mahaObj[m] && mahaObj[m].start_time) {
+          mahaStart = new Date(mahaObj[m].start_time);
+          mahaEnd = new Date(mahaObj[m].end_time);
+        } else if (mahaObj && mahaObj.start_time) {
+          // maybe top-level contained start_time
+          mahaStart = new Date(mahaObj.start_time);
+          mahaEnd = new Date(mahaObj.end_time);
+        } else {
+          // Try to infer: some APIs just provide the timeline of sub-dashas only.
+          // We'll skip if no start_time present.
+        }
+
+        if (mahaStart && mahaEnd && now >= mahaStart && now < mahaEnd) {
+          mahaResult = { name: m, start_time: mahaStart.toISOString(), end_time: mahaEnd.toISOString() };
+
+          // find antardasha inside mahaObj (first whose interval contains now)
+          const subNames = Object.keys(mahaObj || {});
+          for (const s of subNames) {
+            // skip if s === m (the maha entry itself)
+            if (!mahaObj[s] || !mahaObj[s].start_time) continue;
+            const sStart = new Date(mahaObj[s].start_time);
+            const sEnd = new Date(mahaObj[s].end_time);
+            if (now >= sStart && now < sEnd) {
+              antarResult = { name: s, start_time: sStart.toISOString(), end_time: sEnd.toISOString() };
+              break;
+            }
+          }
+
+          // if no antar matched by date, pick the first antar (fallback)
+          if (!antarResult) {
+            for (const s of subNames) {
+              if (mahaObj[s] && mahaObj[s].start_time) {
+                const sStart = new Date(mahaObj[s].start_time);
+                const sEnd = new Date(mahaObj[s].end_time);
+                antarResult = { name: s, start_time: sStart.toISOString(), end_time: sEnd.toISOString() };
+                break;
+              }
+            }
+          }
+
+          break;
+        }
+      }
+    } catch (e) {
+      // parsing error -> continue
+    }
+
+    // If we didn't detect maha/antar from parsed, return raw data
+    if (!mahaResult) {
+      return res.json({ success: true, message: "Could not auto-detect current mahadasha from API response. Returning raw.", raw: parsed });
+    }
+
+    return res.json({
       success: true,
       dob,
       tob,
-      mahadasha: {
-        name: result.mahadasha.name,
-        start_time: result.mahadasha.start_time?.toISOString() || null,
-        end_time: result.mahadasha.end_time?.toISOString() || null,
+      mahandantar: {
+        mahadasha: mahaResult,
+        antardasha: antarResult
       },
-      antardasha: {
-        name: result.antardasha.name,
-        start_time: result.antardasha.start_time?.toISOString() || null,
-        end_time: result.antardasha.end_time?.toISOString() || null,
-      },
-      debug: result.debug,
+      raw: parsed
     });
-  } catch (err) {
-    console.error("Error in /current-dasha:", err);
-    res.status(500).json({ success: false, error: err.message || String(err) });
+
+  } catch (error) {
+    console.error("current-dasha error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Server error" });
   }
 });
 
-// ---------- FRONTEND FORM (with preferred language) ----------
-
-app.get("/form", (req, res) => {
+/**
+ * Browser SQL Admin Page - GET /sql
+ * Simple textarea UI that posts to /run-sql
+ */
+app.get("/sql", (req, res) => {
   res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <title>Astro Playlist Form</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
-        label { display: block; margin-top: 10px; }
-        input, select { padding: 5px; width: 100%; max-width: 300px; }
-        button { margin-top: 15px; padding: 8px 16px; }
-      </style>
-    </head>
-    <body>
-      <h2>Astro Playlist – User Details</h2>
-      <form method="POST" action="/submit">
-        <label>
-          Name:
-          <input type="text" name="name" required />
-        </label>
-
-        <label>
-          Date of Birth:
-          <input type="date" name="dob" required />
-        </label>
-
-        <label>
-          Time of Birth:
-          <input type="time" name="tob" required />
-        </label>
-
-        <label>
-          Place of Birth:
-          <input type="text" name="place" required />
-        </label>
-
-        <label>
-          Problem:
-          <select name="problem" required>
-            <option value="marriage">Marriage</option>
-            <option value="children">Children</option>
-            <option value="money">Money</option>
-            <option value="job">Job / Career</option>
-            <option value="others">Others</option>
-          </select>
-        </label>
-
-        <label>
-          Preferred Language:
-          <select name="lang" required>
-            <option value="en">English</option>
-            <option value="hi">Hindi</option>
-          </select>
-        </label>
-
-        <button type="submit">Submit & Save</button>
-      </form>
-    </body>
-    </html>
+    <h2>Astro SQL Admin Panel</h2>
+    <p>Use this panel carefully. It runs SQL on your Render database.</p>
+    <form onsubmit="runSQL(event)">
+      <textarea id="query" name="query" rows="12" cols="90" placeholder="Write SQL here..."></textarea><br/>
+      <button type="submit">Run SQL</button>
+    </form>
+    <pre id="output" style="background:#f5f5f5;padding:10px;margin-top:12px;"></pre>
+    <script>
+      async function runSQL(e) {
+        e.preventDefault();
+        const query = document.getElementById('query').value;
+        const res = await fetch('/run-sql', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ query })
+        });
+        const data = await res.json();
+        document.getElementById('output').innerText = JSON.stringify(data, null, 2);
+      }
+    </script>
   `);
 });
 
-// ---------- FORM SUBMIT: calculate dasha + save in DB + show localized result ----------
+/**
+ * Run arbitrary SQL (POST /run-sql)
+ * Body: { query: "SQL HERE" }
+ */
+app.post("/run-sql", async (req, res) => {
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ success: false, error: "SQL query missing" });
 
-app.post("/submit", async (req, res) => {
+  let client;
   try {
-    const { name, dob, tob, place, problem, lang } = req.body;
-
-    if (!name || !dob || !tob || !place || !problem || !lang) {
-      return res.status(400).send("Missing required fields");
-    }
-
-    const result = await computeCurrentDasha(dob, tob);
-
-    const row = {
-      name,
-      dob,
-      tob,
-      place,
-      problem,
-      lang,
-      mahadasha: result.mahadasha.name,
-      antardasha: result.antardasha.name,
-      antardasha_end: result.antardasha.end_time,
-    };
-
-    const saved = await saveRequest(row);
-
-    const texts = {
-      en: {
-        title: "Astro Playlist Result",
-        saved: "Result Saved Successfully",
-        recordId: "Record ID",
-        userDetails: "User Details",
-        currentDasha: "Current Dasha",
-        mahadasha: "Mahadasha",
-        antardasha: "Antardasha",
-        antardashaEnd: "Antardasha Ends On",
-        back: "Enter another user",
-      },
-      hi: {
-        title: "ज्योतिष परिणाम",
-        saved: "परिणाम सफलतापूर्वक सेव हो गया",
-        recordId: "रिकॉर्ड आईडी",
-        userDetails: "यूज़र विवरण",
-        currentDasha: "वर्तमान दशा",
-        mahadasha: "महादशा",
-        antardasha: "अंतरदशा",
-        antardashaEnd: "अंतरदशा समाप्त होने की तिथि",
-        back: "नया यूज़र दर्ज करें",
-      },
-    };
-
-    const t = texts[lang] || texts.en;
-
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="${lang}">
-      <head>
-        <meta charset="UTF-8" />
-        <title>${t.title}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
-        </style>
-      </head>
-      <body>
-        <h2>${t.saved} ✅</h2>
-        ${
-          saved.id
-            ? `<p><strong>${t.recordId}:</strong> ${saved.id}</p>`
-            : `<p><em>DB not configured (record not stored, only logged on server).</em></p>`
-        }
-
-        <h3>${t.userDetails}</h3>
-        <ul>
-          <li><strong>Name:</strong> ${name}</li>
-          <li><strong>DOB:</strong> ${dob}</li>
-          <li><strong>TOB:</strong> ${tob}</li>
-          <li><strong>Place:</strong> ${place}</li>
-          <li><strong>Problem:</strong> ${problem}</li>
-          <li><strong>Language:</strong> ${lang}</li>
-        </ul>
-
-        <h3>${t.currentDasha}</h3>
-        <ul>
-          <li><strong>${t.mahadasha}:</strong> ${result.mahadasha.name}</li>
-          <li><strong>${t.antardasha}:</strong> ${result.antardasha.name}</li>
-          <li><strong>${t.antardashaEnd}:</strong> ${
-            result.antardasha.end_time
-              ? result.antardasha.end_time.toISOString()
-              : "N/A"
-          }</li>
-        </ul>
-
-        <p><a href="/form">${t.back}</a></p>
-      </body>
-      </html>
-    `);
+    client = makeClient();
+    await client.connect();
+    const result = await client.query(query);
+    await client.end();
+    return res.json({ success: true, rowCount: result.rowCount, rows: result.rows });
   } catch (err) {
-    console.error("Error in /submit:", err);
-    res.status(500).send("Server error: " + (err.message || String(err)));
+    if (client) {
+      try { await client.end(); } catch(e){/* ignore */ }
+    }
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ---------- Start server ----------
+/**
+ * Save a user submission from frontend:
+ * POST /submit
+ * body: { name, dob, tob, place, problem, mobile, language }
+ */
+app.post("/submit", async (req, res) => {
+  const { name, dob, tob, place, problem, mobile, language } = req.body;
+  if (!name || !dob || !tob) {
+    return res.status(400).json({ success: false, error: "Missing required fields: name,dob,tob" });
+  }
 
+  const insertSQL = `
+    INSERT INTO users (name, dob, tob, place, problem, mobile, language)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    RETURNING id, created_at;
+  `;
+  let client;
+  try {
+    client = makeClient();
+    await client.connect();
+    const result = await client.query(insertSQL, [name, dob, tob, place || null, problem || null, mobile || null, language || null]);
+    await client.end();
+
+    return res.json({ success: true, inserted: result.rows[0] });
+
+  } catch (err) {
+    if (client) { try { await client.end(); } catch(e){} }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Quick endpoint to ensure DATABASE is reachable
+ */
+app.get("/db-check", async (req, res) => {
+  let client;
+  try {
+    client = makeClient();
+    await client.connect();
+    const q = await client.query("SELECT NOW() as now");
+    await client.end();
+    return res.json({ success: true, now: q.rows[0].now });
+  } catch (err) {
+    if (client) { try { await client.end(); } catch(e){} }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
