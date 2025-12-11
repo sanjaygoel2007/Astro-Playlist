@@ -1,7 +1,7 @@
 // server.js (final improved)
 // Requires package.json "type":"module"
-// Env required: DATABASE_URL, ASTRO_API_KEY, ADMIN_SQL_KEY
-// Optional: PORT
+// Env required: DATABASE_URL, ASTRO_API_KEY (optional), ADMIN_SQL_KEY (optional)
+// Optional: PORT, NODE_ENV
 
 import express from "express";
 import dotenv from "dotenv";
@@ -36,7 +36,6 @@ if (!ADMIN_SQL_KEY) {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: (NODE_ENV === "production") ? { rejectUnauthorized: false } : false,
-  // optional pool settings
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000
@@ -66,7 +65,7 @@ async function ensureSchema() {
   }
 }
 
-(async() => {
+(async () => {
   try {
     await ensureSchema();
   } catch (err) {
@@ -79,13 +78,13 @@ const app = express();
 
 // security + basic limits
 app.use(helmet());
-app.use(cors()); // you can customize origin for production
+app.use(cors()); // restrict origin in production if needed
 app.use(express.json());
 app.set("trust proxy", 1);
 
 const limiter = rateLimit({
   windowMs: 30 * 1000, // 30 seconds
-  max: 30 // adjust
+  max: 30 // requests per window per IP
 });
 app.use(limiter);
 
@@ -113,13 +112,13 @@ app.get("/current-dasha", async (req, res) => {
 
     const now = new Date();
 
-    // unwrap potential nested responses (same logic as your file)
+    // unwrap potential nested responses
     let parsed = raw;
     if (typeof raw === "object" && raw.output && typeof raw.output === "string") {
-      try { parsed = JSON.parse(raw.output); } catch(e){ /* ignore */ }
+      try { parsed = JSON.parse(raw.output); } catch (e) { /* ignore */ }
     }
     if (typeof parsed === "string") {
-      try { parsed = JSON.parse(parsed); } catch(e){ /* ignore */ }
+      try { parsed = JSON.parse(parsed); } catch (e) { /* ignore */ }
     }
 
     let mahaResult = null;
@@ -254,4 +253,51 @@ app.post("/run-sql", async (req, res) => {
  * POST /submit
  * body: { name, dob, tob, place, problem, mobile, language }
  */
-app.post("/submit", async
+app.post("/submit", async (req, res) => {
+  try {
+    const { name, dob, tob, place, problem, mobile, language } = req.body;
+    if (!name || !dob || !tob) {
+      return res.status(400).json({ success: false, error: "Missing required fields: name,dob,tob" });
+    }
+
+    const insertSQL = `
+      INSERT INTO users (name, dob, tob, place, problem, mobile, language)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING id, created_at;
+    `;
+
+    const client = await pool.connect();
+    try {
+      const result = await client.query(insertSQL, [name, dob, tob, place || null, problem || null, mobile || null, language || null]);
+      const inserted = result.rows[0] || null;
+      return res.json({ success: true, inserted });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error("submit error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Quick endpoint to ensure DATABASE is reachable
+ */
+app.get("/db-check", async (req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    const q = await client.query("SELECT NOW() as now");
+    return res.json({ success: true, now: q.rows[0].now });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  } finally {
+    if (client) client && client.release();
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
