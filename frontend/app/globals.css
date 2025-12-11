@@ -1,0 +1,24 @@
+:root{
+  --bg:#f7f7fb;
+  --card:#ffffff;
+  --accent:#0f62fe;
+  --muted:#666;
+}
+html,body,#root { height:100%; margin:0; font-family: Inter, system-ui, Arial; background:var(--bg); }
+.container { max-width:900px; margin:36px auto; padding:20px; }
+.card { background:var(--card); border-radius:10px; padding:20px; box-shadow:0 6px 20px rgba(6,10,15,.06); }
+h1 { margin:0 0 10px 0; font-size:22px; }
+label { display:block; margin-top:14px; font-weight:600; color:#222; }
+input[type="text"], input[type="date"], input[type="time"], textarea, select {
+  width:100%; padding:10px 12px; margin-top:6px; border:1px solid #e6e6e9; border-radius:6px;
+  font-size:15px; background:#fff;
+}
+textarea { min-height:110px; resize:vertical; }
+.row { display:flex; gap:12px; }
+.col { flex:1; }
+.button { margin-top:16px; background:var(--accent); color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }
+.small { font-size:13px; color:var(--muted); margin-top:8px; }
+.alert { margin-top:12px; padding:10px; border-radius:6px; }
+.alert.success { background: #e6ffed; color:#0a6f3a; }
+.alert.error { background:#ffecec; color:#7a1515; }
+.lang-select { float:right; }
