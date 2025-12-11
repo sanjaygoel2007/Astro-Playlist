@@ -1,44 +1,106 @@
-// server.js (updated)
-// Assumes: package.json "type":"module"
-// Ensure env: ASTRO_API_KEY, DATABASE_URL, PORT (optional)
+// server.js (final improved)
+// Requires package.json "type":"module"
+// Env required: DATABASE_URL, ASTRO_API_KEY, ADMIN_SQL_KEY
+// Optional: PORT
 
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import pkg from "pg";
-const { Client } = pkg;
+const { Pool } = pkg;
 import { getDasha } from "./src/astrologyService.js";
 
 dotenv.config();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const {
+  DATABASE_URL,
+  ASTRO_API_KEY,
+  ADMIN_SQL_KEY,
+  NODE_ENV = "production"
+} = process.env;
 
-// Helper function to create pg client
-function makeClient() {
-  return new Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-  });
+if (!DATABASE_URL) {
+  console.error("FATAL: DATABASE_URL env missing");
+  process.exit(1);
+}
+if (!ASTRO_API_KEY) {
+  console.warn("Warning: ASTRO_API_KEY not set — /current-dasha will fail without it.");
+}
+if (!ADMIN_SQL_KEY) {
+  console.warn("Warning: ADMIN_SQL_KEY not set — /run-sql endpoint will be disabled.");
 }
 
-/**
- * Basic root healthcheck
- */
+// Pool config - Render/Postgres typically needs ssl.rejectUnauthorized=false
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: (NODE_ENV === "production") ? { rejectUnauthorized: false } : false,
+  // optional pool settings
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000
+});
+
+async function ensureSchema() {
+  // create users table if not exists
+  const create = `
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      dob DATE NOT NULL,
+      tob TEXT NOT NULL,
+      place TEXT,
+      problem TEXT,
+      mobile TEXT,
+      language TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  const client = await pool.connect();
+  try {
+    await client.query(create);
+    console.log("DB: users table is ready");
+  } finally {
+    client.release();
+  }
+}
+
+(async() => {
+  try {
+    await ensureSchema();
+  } catch (err) {
+    console.error("Schema init error:", err);
+    // don't crash — still allow server to start, but DB may fail later
+  }
+})();
+
+const app = express();
+
+// security + basic limits
+app.use(helmet());
+app.use(cors()); // you can customize origin for production
+app.use(express.json());
+app.set("trust proxy", 1);
+
+const limiter = rateLimit({
+  windowMs: 30 * 1000, // 30 seconds
+  max: 30 // adjust
+});
+app.use(limiter);
+
+/** root */
 app.get("/", (req, res) => {
   res.send("Astro Playlist backend is running ⚡");
 });
 
 /**
- * MAIN ROUTE → /current-dasha
- * Query params: dob=YYYY-MM-DD&tob=HH:MM
- * Returns processed result (mahadasha + antardasha) and original raw API data.
+ * /current-dasha
+ * Query: dob=YYYY-MM-DD&tob=HH:MM
  */
 app.get("/current-dasha", async (req, res) => {
   try {
     const { dob, tob } = req.query;
-
     if (!dob || !tob) {
       return res.status(400).json({
         success: false,
@@ -46,65 +108,43 @@ app.get("/current-dasha", async (req, res) => {
       });
     }
 
-    // Call your astrology service
+    // call astrology service
     const raw = await getDasha({ dob, tob });
 
-    // Try to find current maha & antar for "today" (server time)
-    // If API returns nested structure where keys are mahadasha names and values are maps of sub-dashas,
-    // then we will parse and pick the maha whose start<=now<end and the first antar inside it that contains now.
     const now = new Date();
 
-    // If API returns object with {"statusCode":200,"output":"{...json...}"} (stringified),
-    // attempt to unwrap.
+    // unwrap potential nested responses (same logic as your file)
     let parsed = raw;
     if (typeof raw === "object" && raw.output && typeof raw.output === "string") {
-      try {
-        parsed = JSON.parse(raw.output);
-      } catch (e) {
-        // leave parsed = raw
-      }
+      try { parsed = JSON.parse(raw.output); } catch(e){ /* ignore */ }
     }
-
-    // If parsed is a string that itself is JSON:
     if (typeof parsed === "string") {
-      try {
-        parsed = JSON.parse(parsed);
-      } catch (e) { /* ignore */ }
+      try { parsed = JSON.parse(parsed); } catch(e){ /* ignore */ }
     }
 
-    // parsed is expected to be an object with top-level mahadashas
     let mahaResult = null;
     let antarResult = null;
+
     try {
-      // parsed might be { "Moon": {...}, "Mars": {...}, ... } where for each maha there are sub objects.
       const mahaNames = Object.keys(parsed || {});
       for (const m of mahaNames) {
         const mahaObj = parsed[m];
-        // mahaObj might contain a property for the maha itself (e.g., mahaObj[m] with start_time/end_time)
-        // or the API might be differently structured. We'll attempt several ways.
         let mahaStart = null;
         let mahaEnd = null;
 
-        // If mahaObj contains property with same name:
         if (mahaObj && typeof mahaObj === "object" && mahaObj[m] && mahaObj[m].start_time) {
           mahaStart = new Date(mahaObj[m].start_time);
           mahaEnd = new Date(mahaObj[m].end_time);
         } else if (mahaObj && mahaObj.start_time) {
-          // maybe top-level contained start_time
           mahaStart = new Date(mahaObj.start_time);
           mahaEnd = new Date(mahaObj.end_time);
-        } else {
-          // Try to infer: some APIs just provide the timeline of sub-dashas only.
-          // We'll skip if no start_time present.
         }
 
         if (mahaStart && mahaEnd && now >= mahaStart && now < mahaEnd) {
           mahaResult = { name: m, start_time: mahaStart.toISOString(), end_time: mahaEnd.toISOString() };
 
-          // find antardasha inside mahaObj (first whose interval contains now)
           const subNames = Object.keys(mahaObj || {});
           for (const s of subNames) {
-            // skip if s === m (the maha entry itself)
             if (!mahaObj[s] || !mahaObj[s].start_time) continue;
             const sStart = new Date(mahaObj[s].start_time);
             const sEnd = new Date(mahaObj[s].end_time);
@@ -114,7 +154,6 @@ app.get("/current-dasha", async (req, res) => {
             }
           }
 
-          // if no antar matched by date, pick the first antar (fallback)
           if (!antarResult) {
             for (const s of subNames) {
               if (mahaObj[s] && mahaObj[s].start_time) {
@@ -125,15 +164,13 @@ app.get("/current-dasha", async (req, res) => {
               }
             }
           }
-
           break;
         }
       }
     } catch (e) {
-      // parsing error -> continue
+      console.warn("Parsing error in /current-dasha:", e);
     }
 
-    // If we didn't detect maha/antar from parsed, return raw data
     if (!mahaResult) {
       return res.json({ success: true, message: "Could not auto-detect current mahadasha from API response. Returning raw.", raw: parsed });
     }
@@ -156,26 +193,31 @@ app.get("/current-dasha", async (req, res) => {
 });
 
 /**
- * Browser SQL Admin Page - GET /sql
- * Simple textarea UI that posts to /run-sql
+ * Simple SQL admin UI
+ * only enabled when ADMIN_SQL_KEY is set
  */
 app.get("/sql", (req, res) => {
+  if (!ADMIN_SQL_KEY) {
+    return res.status(403).send("SQL admin disabled (ADMIN_SQL_KEY not configured).");
+  }
   res.send(`
     <h2>Astro SQL Admin Panel</h2>
     <p>Use this panel carefully. It runs SQL on your Render database.</p>
     <form onsubmit="runSQL(event)">
       <textarea id="query" name="query" rows="12" cols="90" placeholder="Write SQL here..."></textarea><br/>
+      <input id="key" placeholder="Admin key" style="width:400px"/><br/><br/>
       <button type="submit">Run SQL</button>
     </form>
     <pre id="output" style="background:#f5f5f5;padding:10px;margin-top:12px;"></pre>
     <script>
-      async function runSQL(e) {
+      async function runSQL(e){
         e.preventDefault();
         const query = document.getElementById('query').value;
+        const key = document.getElementById('key').value;
         const res = await fetch('/run-sql', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ query })
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ query, key })
         });
         const data = await res.json();
         document.getElementById('output').innerText = JSON.stringify(data, null, 2);
@@ -186,77 +228,30 @@ app.get("/sql", (req, res) => {
 
 /**
  * Run arbitrary SQL (POST /run-sql)
- * Body: { query: "SQL HERE" }
+ * Body: { query: "SQL HERE", key: "ADMIN_SQL_KEY" }
+ * Protected by ADMIN_SQL_KEY env
  */
 app.post("/run-sql", async (req, res) => {
-  const { query } = req.body;
+  if (!ADMIN_SQL_KEY) return res.status(403).json({ success: false, error: "Not enabled" });
+  const { query, key } = req.body;
   if (!query) return res.status(400).json({ success: false, error: "SQL query missing" });
+  if (!key || key !== ADMIN_SQL_KEY) return res.status(401).json({ success: false, error: "Invalid admin key" });
 
   let client;
   try {
-    client = makeClient();
-    await client.connect();
+    client = await pool.connect();
     const result = await client.query(query);
-    await client.end();
     return res.json({ success: true, rowCount: result.rowCount, rows: result.rows });
   } catch (err) {
-    if (client) {
-      try { await client.end(); } catch(e){/* ignore */ }
-    }
     return res.status(500).json({ success: false, error: err.message });
+  } finally {
+    if (client) client.release();
   }
 });
 
 /**
- * Save a user submission from frontend:
+ * Save submission
  * POST /submit
  * body: { name, dob, tob, place, problem, mobile, language }
  */
-app.post("/submit", async (req, res) => {
-  const { name, dob, tob, place, problem, mobile, language } = req.body;
-  if (!name || !dob || !tob) {
-    return res.status(400).json({ success: false, error: "Missing required fields: name,dob,tob" });
-  }
-
-  const insertSQL = `
-    INSERT INTO users (name, dob, tob, place, problem, mobile, language)
-    VALUES ($1,$2,$3,$4,$5,$6,$7)
-    RETURNING id, created_at;
-  `;
-  let client;
-  try {
-    client = makeClient();
-    await client.connect();
-    const result = await client.query(insertSQL, [name, dob, tob, place || null, problem || null, mobile || null, language || null]);
-    await client.end();
-
-    return res.json({ success: true, inserted: result.rows[0] });
-
-  } catch (err) {
-    if (client) { try { await client.end(); } catch(e){} }
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/**
- * Quick endpoint to ensure DATABASE is reachable
- */
-app.get("/db-check", async (req, res) => {
-  let client;
-  try {
-    client = makeClient();
-    await client.connect();
-    const q = await client.query("SELECT NOW() as now");
-    await client.end();
-    return res.json({ success: true, now: q.rows[0].now });
-  } catch (err) {
-    if (client) { try { await client.end(); } catch(e){} }
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.post("/submit", async
