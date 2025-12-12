@@ -1,12 +1,12 @@
-import ClientForm from "../components/ClientForm";
+// frontend/app/page.jsx
 import "../globals.css";
+import ClientForm from "../components/ClientForm";
 
 export default function Page() {
   return (
-    <div className="container">
-      <div className="card" style={{ marginBottom: 12 }}>
-        <ClientForm />
-      </div>
-    </div>
+    <main style={{ padding: 20 }}>
+      <h1>Astro Playlist — Submit</h1>
+      <ClientForm />
+    </main>
   );
 }
