@@ -1,4 +1,5 @@
 import "./globals.css";         // <-- change here
+"use client";
 import dynamic from "next/dynamic";
 
 const Form = dynamic(() => import("../components/Form"), { ssr:false });
