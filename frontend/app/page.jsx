@@ -1,5 +1,5 @@
 // frontend/app/page.jsx
-import "../globals.css";
+import "../app/globals.css";
 import ClientForm from "../components/ClientForm";
 
 export default function Page() {
