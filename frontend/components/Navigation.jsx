@@ -40,22 +40,29 @@ export default function Navigation() {
         margin: "0 auto",
         display: "flex",
         justifyContent: "space-between",
-        alignItems: "center"
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: "0.5rem"
       }}>
         <a href="/" style={{
           textDecoration: "none",
-          fontSize: "1.5rem",
+          fontSize: "clamp(1.1rem, 4vw, 1.5rem)",
           fontWeight: "700",
           background: "linear-gradient(135deg, #FF6B35 0%, #FF8C5A 50%, #FFD700 100%)",
           WebkitBackgroundClip: "text",
           WebkitTextFillColor: "transparent",
           backgroundClip: "text",
           fontFamily: "'Playfair Display', serif",
-          letterSpacing: "-0.02em"
+          letterSpacing: "-0.02em",
+          whiteSpace: "nowrap"
         }}>
           ✨ Astro Playlist
         </a>
-        <div style={{ display: "flex", gap: "1rem" }}>
+        <div style={{ 
+          display: "flex", 
+          gap: "0.5rem",
+          flexWrap: "wrap"
+        }}>
           <a 
             href="/" 
             style={linkStyle(pathname === "/")}

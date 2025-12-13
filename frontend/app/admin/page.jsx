@@ -104,7 +104,7 @@ export default function AdminPanel() {
         {success && <div className="alert alert-success">{success}</div>}
 
         <form onSubmit={handleSubmit} style={{ marginBottom: "2rem" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
+          <div className="admin-form-grid">
             <div className="form-group">
               <label>Star *</label>
               <select
