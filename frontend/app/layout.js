@@ -1,12 +1,26 @@
 export const metadata = {
-  title: "Astro Playlist",
-  description: "Astrology App Frontend"
+  title: "Astro Playlist - Personalized Astrological Video Playlists",
+  description: "Get personalized YouTube playlists based on your astrological chart and life problems. Discover remedies through Mahadasha and Antardasha insights.",
+  keywords: "astrology, horoscope, mahadasha, antardasha, remedies, YouTube playlist",
+  viewport: "width=device-width, initial-scale=1",
 };
+
+import Navigation from "../components/Navigation";
+import "../app/globals.css";
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body>
+        <Navigation />
+        <div style={{ paddingTop: "80px" }}>
+          {children}
+        </div>
+      </body>
     </html>
   );
 }
