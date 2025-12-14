@@ -1,20 +1,23 @@
 // backend/dasha/dashaCalculator.js
-import swe from "swisseph";
+// Accurate Vimshottari Dasha (Birth Nakshatra based)
+// Node 16+ | type: module
 
-// Vimshottari dasha order
+import swisseph from "swisseph";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// ---------- Swiss Ephemeris setup ----------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+swisseph.set_ephe_path(__dirname); // ephemeris path
+
+// ---------- Vimshottari order ----------
 const DASHA_ORDER = [
-  "Ketu",
-  "Venus",
-  "Sun",
-  "Moon",
-  "Mars",
-  "Rahu",
-  "Jupiter",
-  "Saturn",
-  "Mercury"
+  "Ketu", "Venus", "Sun", "Moon", "Mars",
+  "Rahu", "Jupiter", "Saturn", "Mercury"
 ];
 
-// Vimshottari years
 const DASHA_YEARS = {
   Ketu: 7,
   Venus: 20,
@@ -27,76 +30,86 @@ const DASHA_YEARS = {
   Mercury: 17
 };
 
-export function calculateCurrentDasha(dob, tob) {
-  // 1️⃣ Parse date & time
+// Nakshatra lords (27)
+const NAKSHATRA_LORDS = [
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury"
+];
+
+// ---------- Helpers ----------
+function toJulian(dob, tob) {
   const [y, m, d] = dob.split("-").map(Number);
   const [hh, mm] = tob.split(":").map(Number);
+  return swisseph.julday(y, m, d, hh + mm / 60, swisseph.GREG_CAL);
+}
 
-  // 2️⃣ Julian Day
-  const jd = swe.swe_julday(
-    y,
-    m,
-    d,
-    hh + mm / 60,
-    swe.SE_GREG_CAL
-  );
+function addYears(date, years) {
+  const d = new Date(date);
+  d.setTime(d.getTime() + years * 365.2422 * 24 * 3600 * 1000);
+  return d;
+}
 
-  // 3️⃣ Moon longitude
-  const moon = swe.swe_calc_ut(
-    jd,
-    swe.SE_MOON,
-    swe.SEFLG_SWIEPH
-  );
+// ---------- MAIN FUNCTION ----------
+export function calculateCurrentDasha(dob, tob) {
+  // ---- Moon longitude ----
+  const jd = toJulian(dob, tob);
+
+  const moon = swisseph.calc_ut(jd, swisseph.SE_MOON);
+  if (moon.error) throw new Error(moon.error);
 
   const moonLon = moon.longitude;
 
-  // 4️⃣ Nakshatra
-  const NAK_LEN = 13 + 1 / 3;
-  const nakIndex = Math.floor(moonLon / NAK_LEN);
-  const nakFrac = (moonLon % NAK_LEN) / NAK_LEN;
+  // ---- Nakshatra ----
+  const nakIndex = Math.floor(moonLon / (360 / 27));
+  const nakLord = NAKSHATRA_LORDS[nakIndex];
 
-  // 5️⃣ Mahadasha
-  const mdIndex = nakIndex % 9;
-  const mahadasha = DASHA_ORDER[mdIndex];
-  const mdYears = DASHA_YEARS[mahadasha];
+  const nakStart = nakIndex * (360 / 27);
+  const nakProgress = (moonLon - nakStart) / (360 / 27);
 
-  // 6️⃣ Antardasha
-  const adSequence = [];
-  for (let i = 0; i < 9; i++) {
-    adSequence.push(DASHA_ORDER[(mdIndex + i) % 9]);
+  // ---- Balance of Mahadasha at birth ----
+  const mdYears = DASHA_YEARS[nakLord];
+  const mdBalanceYears = mdYears * (1 - nakProgress);
+
+  const birthDate = new Date(`${dob}T${tob}:00+05:30`);
+  let cursorDate = addYears(birthDate, mdBalanceYears);
+
+  // ---- Find current Mahadasha ----
+  let mdIndex = DASHA_ORDER.indexOf(nakLord);
+  let currentMD = nakLord;
+
+  while (cursorDate < new Date()) {
+    mdIndex = (mdIndex + 1) % 9;
+    currentMD = DASHA_ORDER[mdIndex];
+    cursorDate = addYears(cursorDate, DASHA_YEARS[currentMD]);
   }
 
-  const adDurations = adSequence.map(
-    (d) => (DASHA_YEARS[d] * mdYears) / 120
-  );
+  // ---- Antardasha ----
+  const mdStart = addYears(cursorDate, -DASHA_YEARS[currentMD]);
+  const mdDurationMs = DASHA_YEARS[currentMD] * 365.2422 * 24 * 3600 * 1000;
 
-  let elapsed = nakFrac * mdYears;
-  let antardasha = adSequence[0];
-  let remainingYears = adDurations[0];
+  let adStart = mdStart;
+  let currentAD = null;
+  let adEnd = null;
 
-  for (let i = 0; i < adSequence.length; i++) {
-    if (elapsed <= adDurations[i]) {
-      antardasha = adSequence[i];
-      remainingYears = adDurations[i] - elapsed;
+  for (let i = 0; i < 9; i++) {
+    const adLord = DASHA_ORDER[(mdIndex + i) % 9];
+    const adYears = (DASHA_YEARS[adLord] / 120) * DASHA_YEARS[currentMD];
+    const adMs = adYears * 365.2422 * 24 * 3600 * 1000;
+    const adFinish = new Date(adStart.getTime() + adMs);
+
+    if (new Date() < adFinish) {
+      currentAD = adLord;
+      adEnd = adFinish;
       break;
     }
-    elapsed -= adDurations[i];
+    adStart = adFinish;
   }
 
-  // 7️⃣ Antardasha end date
-  const endDate = new Date(dob);
-  endDate.setDate(
-    endDate.getDate() + Math.round(remainingYears * 365.25)
-  );
-
   return {
-    dob,
-    tob,
-    place: "Delhi",
-    mahadasha,
-    antardasha,
-    antardasha_end_date: endDate
-      .toISOString()
-      .split("T")[0]
+    birthNakshatra: nakIndex + 1,
+    mahadasha: currentMD,
+    antardasha: currentAD,
+    antardashaEndDate: adEnd.toISOString().split("T")[0]
   };
 }
