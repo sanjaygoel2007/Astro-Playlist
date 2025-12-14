@@ -1,5 +1,6 @@
-const express = require("express");
-const { calculateCurrentDasha } = require("./dashaCalculator");
+// backend/dasha/routes.js
+import express from "express";
+import { calculateCurrentDasha } from "./dashaCalculator.js";
 
 const router = express.Router();
 
@@ -14,11 +15,11 @@ router.get("/test-dasha", (req, res) => {
     }
 
     const result = calculateCurrentDasha(dob, tob);
-    res.json(result);
+    return res.json(result);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Dasha error" });
+    console.error("Dasha route error:", e);
+    return res.status(500).json({ error: "Dasha error" });
   }
 });
 
-module.exports = router;
+export default router;
