@@ -1,0 +1,14 @@
+{
+  "name": "dasha-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "swisseph": "^0.5.17",
+    "moment-timezone": "^0.5.45"
+  }
+}
