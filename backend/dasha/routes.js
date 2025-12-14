@@ -3,6 +3,10 @@ const { calculateCurrentDasha } = require("./dashaCalculator");
 
 const router = express.Router();
 
+/**
+ * URL:
+ * /dasha/test-dasha?dob=YYYY-MM-DD&tob=HH:mm
+ */
 router.get("/test-dasha", (req, res) => {
   try {
     const { dob, tob } = req.query;
@@ -15,8 +19,8 @@ router.get("/test-dasha", (req, res) => {
 
     const result = calculateCurrentDasha(dob, tob);
     res.json(result);
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error("Dasha error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
