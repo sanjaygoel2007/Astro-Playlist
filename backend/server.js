@@ -1,7 +1,22 @@
 // backend/server.js
 // Requires: NODE 16+
 // Ensure env: DATABASE_URL, ASTRO_API_KEY (optional), ADMIN_SQL_KEY (optional), PORT (optional)
-
+{
+  "type": "module",
+  "name": "astro-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "pg": "^8.11.5",
+    "swisseph": "^0.5.17"
+  }
+}
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
