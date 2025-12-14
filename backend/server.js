@@ -605,96 +605,6 @@ app.post("/api/admin/star-problems", async (req, res) => {
 // ==================== UTILITY ENDPOINTS ====================
 
 /**
- * GET /current-dasha
- * Query params: dob=YYYY-MM-DD&tob=HH:MM
- * Returns parsed mahadasha/antardasha if available (calls getDasha)
- */
-app.get("/current-dasha", async (req, res) => {
-  try {
-    const { dob, tob } = req.query;
-    if (!dob || !tob) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing dob or tob parameter (use format dob=yyyy-mm-dd&tob=hh:mm)"
-      });
-    }
-
-    const raw = await getDasha({ dob, tob });
-    const now = new Date();
-
-    let parsed = raw;
-    if (typeof raw === "object" && raw.output && typeof raw.output === "string") {
-      try { parsed = JSON.parse(raw.output); } catch(e){ /* ignore */ }
-    }
-    if (typeof parsed === "string") {
-      try { parsed = JSON.parse(parsed); } catch(e){ /* ignore */ }
-    }
-
-    let mahaResult = null;
-    let antarResult = null;
-    try {
-      const mahaNames = Object.keys(parsed || {});
-      for (const m of mahaNames) {
-        const mahaObj = parsed[m];
-        let mahaStart = null;
-        let mahaEnd = null;
-        if (mahaObj && typeof mahaObj === "object" && mahaObj[m] && mahaObj[m].start_time) {
-          mahaStart = new Date(mahaObj[m].start_time);
-          mahaEnd = new Date(mahaObj[m].end_time);
-        } else if (mahaObj && mahaObj.start_time) {
-          mahaStart = new Date(mahaObj.start_time);
-          mahaEnd = new Date(mahaObj.end_time);
-        }
-        if (mahaStart && mahaEnd && now >= mahaStart && now < mahaEnd) {
-          mahaResult = { name: m, start_time: mahaStart.toISOString(), end_time: mahaEnd.toISOString() };
-          const subNames = Object.keys(mahaObj || {});
-          for (const s of subNames) {
-            if (!mahaObj[s] || !mahaObj[s].start_time) continue;
-            const sStart = new Date(mahaObj[s].start_time);
-            const sEnd = new Date(mahaObj[s].end_time);
-            if (now >= sStart && now < sEnd) {
-              antarResult = { name: s, start_time: sStart.toISOString(), end_time: sEnd.toISOString() };
-              break;
-            }
-          }
-          if (!antarResult) {
-            for (const s of subNames) {
-              if (mahaObj[s] && mahaObj[s].start_time) {
-                antarResult = {
-                  name: s,
-                  start_time: new Date(mahaObj[s].start_time).toISOString(),
-                  end_time: new Date(mahaObj[s].end_time).toISOString()
-                };
-                break;
-              }
-            }
-          }
-          break;
-        }
-      }
-    } catch (e) {
-      console.warn("Parsing error in /current-dasha:", e);
-    }
-
-    if (!mahaResult) {
-      return res.json({ success: true, message: "Could not auto-detect current mahadasha from API response. Returning raw.", raw: parsed });
-    }
-
-    return res.json({
-      success: true,
-      dob,
-      tob,
-      mahandantar: { mahadasha: mahaResult, antardasha: antarResult },
-      raw: parsed
-    });
-
-  } catch (error) {
-    console.error("current-dasha error:", error);
-    return res.status(500).json({ success: false, error: error.message || "Server error" });
-  }
-});
-
-/**
  * GET /db-check
  * Optional simple database check
  */
@@ -712,6 +622,32 @@ app.get("/db-check", async (req, res) => {
   }
 });
 
+// 404 handler for debugging
+app.use((req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({ 
+    success: false, 
+    error: "Route not found",
+    method: req.method,
+    path: req.path,
+    availableRoutes: [
+      "GET /",
+      "POST /api/auth/send-otp",
+      "POST /api/auth/verify-otp",
+      "GET /submit",
+      "POST /api/submit",
+      "GET /api/submissions/:mobileNumber",
+      "GET /current-dasha",
+      "GET /api/admin/star-problems",
+      "POST /api/admin/star-problems",
+      "GET /db-check"
+    ]
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Available routes:`);
+  console.log(`  GET  /api/admin/star-problems`);
+  console.log(`  POST /api/admin/star-problems`);
 });
