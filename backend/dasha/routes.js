@@ -1,5 +1,5 @@
-const express = require("express");
-const { calculateCurrentDasha } = require("./dashaCalculator");
+import express from "express";
+import { calculateCurrentDasha } from "./dashaCalculator.js";
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ router.get("/test-dasha", (req, res) => {
     if (!dob || !tob) {
       return res.status(400).json({
         success: false,
-        error: "dob and tob required"
+        error: "dob and tob are required"
       });
     }
 
@@ -18,17 +18,15 @@ router.get("/test-dasha", (req, res) => {
 
     res.json({
       success: true,
-      place: "Delhi",
       ...result
     });
-
   } catch (err) {
-    console.error(err);
+    console.error("Dasha error:", err);
     res.status(500).json({
       success: false,
-      error: "Dasha calculation failed"
+      error: "Failed to calculate dasha"
     });
   }
 });
 
-module.exports = router;
+export default router;
