@@ -21,7 +21,7 @@ export default function Page() {
 
   const handleAuthVerified = (mobile, authToken) => {
     setMobileNumber(mobile);
-    setToken(authToken);
+    setToken(authToken || "no-token"); // Token is optional now
     setStep("form");
   };
 

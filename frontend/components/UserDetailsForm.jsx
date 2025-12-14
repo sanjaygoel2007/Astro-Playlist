@@ -52,7 +52,7 @@ export default function UserDetailsForm({ language, mobileNumber, token, onSubmi
     try {
       const payload = {
         mobileNumber: `+91${mobileNumber}`,
-        token,
+        token: token || null, // Token is optional
         name: formData.name,
         dateOfBirth: formData.dateOfBirth,
         timeOfBirth: formData.timeOfBirth || null,
