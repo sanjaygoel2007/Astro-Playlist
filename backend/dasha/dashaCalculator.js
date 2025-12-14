@@ -3,8 +3,6 @@ import swe from "swisseph";
 import { NAKSHATRAS } from "./nakshatra.js";
 import { formatDate } from "./utils.js";
 
-swe.set_ephe_path("./ephe"); // default path
-
 const DASHA_YEARS = {
   Ketu: 7,
   Venus: 20,
@@ -30,52 +28,47 @@ function getJulianDay(date) {
   );
 }
 
-function getMoonLongitude(date) {
-  const jd = getJulianDay(date);
-  const result = swe.calc_ut(jd, swe.MOON, swe.FLG_SWIEPH);
-  return result.longitude;
+function addYears(date, years) {
+  const ms = years * 365.2422 * 24 * 60 * 60 * 1000;
+  return new Date(date.getTime() + ms);
 }
 
-export function calculateCurrentDasha(dobStr, tobStr) {
-  const birthDate = new Date(`${dobStr}T${tobStr}:00+05:30`);
+function getMoonLongitude(date) {
+  const jd = getJulianDay(date);
+  const res = swe.calc_ut(jd, swe.MOON);
+  return res[0]; // ✅ longitude
+}
+
+export function calculateCurrentDasha(dob, tob) {
+  const birth = new Date(`${dob}T${tob}:00+05:30`);
   const today = new Date();
 
-  const moonLon = getMoonLongitude(birthDate);
+  const moonLon = getMoonLongitude(birth);
 
   const nakIndex = Math.floor(moonLon / (360 / 27));
   const nakshatra = NAKSHATRAS[nakIndex];
+
   const mahadashaLord = nakshatra.lord;
 
-  const nakPortion = (moonLon % (360 / 27)) / (360 / 27);
-  const balanceYears =
-    DASHA_YEARS[mahadashaLord] * (1 - nakPortion);
+  const nakFrac = (moonLon % (360 / 27)) / (360 / 27);
+  const balanceYears = DASHA_YEARS[mahadashaLord] * (1 - nakFrac);
 
-  let cursor = new Date(birthDate);
-  cursor.setFullYear(cursor.getFullYear() + balanceYears);
-
+  let mdStart = addYears(birth, balanceYears);
   let mdIndex = DASHA_ORDER.indexOf(mahadashaLord);
 
-  while (cursor < today) {
+  while (mdStart < today) {
     mdIndex = (mdIndex + 1) % 9;
-    cursor.setFullYear(
-      cursor.getFullYear() + DASHA_YEARS[DASHA_ORDER[mdIndex]]
-    );
+    mdStart = addYears(mdStart, DASHA_YEARS[DASHA_ORDER[mdIndex]]);
   }
 
   const currentMahadasha = DASHA_ORDER[mdIndex];
-
-  // Antardasha
-  let adCursor = new Date(
-    cursor.getFullYear() - DASHA_YEARS[currentMahadasha],
-    cursor.getMonth(),
-    cursor.getDate()
-  );
+  let adStart = addYears(mdStart, -DASHA_YEARS[currentMahadasha]);
 
   for (let ad of DASHA_ORDER) {
     const adYears =
       (DASHA_YEARS[ad] / 120) * DASHA_YEARS[currentMahadasha];
-    const adEnd = new Date(adCursor);
-    adEnd.setFullYear(adEnd.getFullYear() + adYears);
+
+    const adEnd = addYears(adStart, adYears);
 
     if (today <= adEnd) {
       return {
@@ -86,7 +79,9 @@ export function calculateCurrentDasha(dobStr, tobStr) {
         moon_longitude: moonLon.toFixed(2)
       };
     }
-    adCursor = adEnd;
+
+    adStart = adEnd;
   }
 
-  return { error: "Dasha
+  return { error: "Dasha calculation failed" };
+          }
