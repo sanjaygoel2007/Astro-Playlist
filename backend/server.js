@@ -7,7 +7,7 @@ import cors from "cors";
 import pkg from "pg";
 const { Pool } = pkg;
 
-import { getDasha } from "./src/astrologyService.js";
+//import { getDasha } from "./src/astrologyService.js";
 import { sendOTP, verifyOTP } from "./src/otpService.js";
 
 // ✅ DASHA ROUTES (NEW – SAFE)
