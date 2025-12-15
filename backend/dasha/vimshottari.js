@@ -1,20 +1,12 @@
 /**
- * Offline Vimshottari Dasha Calculator
- * -----------------------------------
- * Auto-calculation ke liye use karein.
- * Manual AstroSage verification baad me DB se override ho sakta hai.
+ * Stable Auto-Approx Vimshottari
+ * Purpose: Default playlist assignment
+ * Manual AstroSage verification expected
  */
 
 const DASHA_ORDER = [
-  "Ketu",
-  "Venus",
-  "Sun",
-  "Moon",
-  "Mars",
-  "Rahu",
-  "Jupiter",
-  "Saturn",
-  "Mercury"
+  "Ketu","Venus","Sun","Moon","Mars",
+  "Rahu","Jupiter","Saturn","Mercury"
 ];
 
 const DASHA_YEARS = {
@@ -29,56 +21,30 @@ const DASHA_YEARS = {
   Mercury: 17
 };
 
-const NAKSHATRA_LORDS = [
-  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
-  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
-  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury"
-];
-
-const NAKSHATRA_LENGTH = 13 + 20 / 60; // 13°20'
-
 function addDays(date, days) {
   const d = new Date(date);
-  d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+  d.setTime(d.getTime() + days * 86400000);
   return d;
 }
 
 /**
- * @param {string} dob - YYYY-MM-DD
- * @param {number} moonLongitude - sidereal (Lahiri), 0–360
+ * AUTO MODE (NO Moon longitude guessing)
+ * Default assumption:
+ *   - Mahadasha = Saturn
+ *   - Used only for default playlist
  */
-export function calculateCurrentDasha(dob, moonLongitude) {
-  const birthDate = new Date(dob);
+export function calculateCurrentDasha(dob) {
   const today = new Date();
 
-  // 1️⃣ Nakshatra
-  const nakIndex = Math.floor(moonLongitude / NAKSHATRA_LENGTH);
-  const nakLord = NAKSHATRA_LORDS[nakIndex];
+  // 🔒 LOCKED DEFAULT (stable)
+  const currentMD = "Saturn";
+  const mdIndex = DASHA_ORDER.indexOf(currentMD);
 
-  // 2️⃣ Balance of Mahadasha at birth
-  const nakStart = nakIndex * NAKSHATRA_LENGTH;
-  const travelled = moonLongitude - nakStart;
-  const remainingFraction =
-    (NAKSHATRA_LENGTH - travelled) / NAKSHATRA_LENGTH;
+  // Saturn Mahadasha approx window
+  const mdStart = new Date("2009-01-01"); // safe historical anchor
+  const mdEnd = addDays(mdStart, DASHA_YEARS[currentMD] * 365.2422);
 
-  let mdIndex = DASHA_ORDER.indexOf(nakLord);
-  let currentMD = nakLord;
-
-  let mdYearsRemaining =
-    DASHA_YEARS[nakLord] * remainingFraction;
-
-  let mdStart = new Date(birthDate);
-  let mdEnd = addDays(mdStart, mdYearsRemaining * 365.2422);
-
-  // 3️⃣ Find current Mahadasha
-  while (today > mdEnd) {
-    mdStart = mdEnd;
-    mdIndex = (mdIndex + 1) % DASHA_ORDER.length;
-    currentMD = DASHA_ORDER[mdIndex];
-    mdEnd = addDays(mdStart, DASHA_YEARS[currentMD] * 365.2422);
-  }
-
-  // 4️⃣ Antardasha
+  // Antardasha calculation
   let adStart = mdStart;
   let currentAD = null;
   let adEnd = null;
@@ -102,6 +68,7 @@ export function calculateCurrentDasha(dob, moonLongitude) {
     mahadasha: currentMD,
     antardasha: currentAD,
     antardasha_end_date: adEnd.toISOString().split("T")[0],
-    calculation_source: "offline-vimshottari"
+    calculation_source: "auto-default",
+    confidence: "low (manual verification recommended)"
   };
 }
