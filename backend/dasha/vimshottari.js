@@ -4,7 +4,8 @@
  * Goal:
  * - Mahadasha mostly correct
  * - Antardasha approx
- * - Date may change after manual verification
+ * - End date near present/future
+ * - Manual AstroSage verification expected
  */
 
 const DASHA_ORDER = [
@@ -19,23 +20,24 @@ function addDays(date, days) {
 }
 
 export function calculateCurrentDasha(dob) {
-  const today = new Date(dob);
-
+  const today = new Date();        // ✅ FIX: real current date
   const birth = new Date(dob);
+
   const year = birth.getFullYear();
   const month = birth.getMonth() + 1;
   const day = birth.getDate();
 
-  // 1️⃣ Mahadasha (approx but stable)
+  // 1️⃣ Mahadasha (approx, DOB-driven)
   const mdIndex = year % DASHA_ORDER.length;
   const mahadasha = DASHA_ORDER[mdIndex];
 
-  // 2️⃣ Antardasha (within Mahadasha)
+  // 2️⃣ Antardasha (within Mahadasha, approx)
   const adIndex = (day + month) % DASHA_ORDER.length;
-  const antardasha = DASHA_ORDER[(mdIndex + adIndex) % DASHA_ORDER.length];
+  const antardasha =
+    DASHA_ORDER[(mdIndex + adIndex) % DASHA_ORDER.length];
 
-  // 3️⃣ Approx end date (18–30 months window)
-  const approxDays = 550 + ((day + month) % 300);
+  // 3️⃣ Approx end date (future window, not past)
+  const approxDays = 450 + ((day + month) % 300); // ~15–25 months
   const endDate = addDays(today, approxDays);
 
   return {
