@@ -5,6 +5,13 @@ const router = express.Router();
 
 router.get("/test-prokerala-token", async (req, res) => {
   try {
+    if (!process.env.PROKERALA_CLIENT_ID || !process.env.PROKERALA_CLIENT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        error: "PROKERALA_CLIENT_ID or PROKERALA_CLIENT_SECRET missing"
+      });
+    }
+
     const response = await fetch("https://api.prokerala.com/token", {
       method: "POST",
       headers: {
