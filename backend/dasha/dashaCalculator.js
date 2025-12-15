@@ -1,6 +1,5 @@
 // backend/dasha/dashaCalculator.js
 // Accurate Vimshottari Dasha (Node-compatible, NO julday)
-console.log("🔥 NEW DASHACALCULATOR LOADED – VERSION 2025-01-LOCKED");
 import swisseph from "swisseph";
 
 /* ================= Vimshottari constants ================= */
