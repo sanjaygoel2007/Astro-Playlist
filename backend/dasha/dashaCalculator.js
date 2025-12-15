@@ -1,11 +1,7 @@
 // backend/dasha/dashaCalculator.js
 import fetch from "node-fetch";
 
-/**
- * ===============================
- * Prokerala OAuth Token Handling
- * ===============================
- */
+/* ================= TOKEN HANDLING ================= */
 
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -13,7 +9,6 @@ let tokenExpiry = 0;
 async function getProkeralaToken() {
   const now = Date.now();
 
-  // reuse token if valid
   if (cachedToken && now < tokenExpiry) {
     return cachedToken;
   }
@@ -39,7 +34,7 @@ async function getProkeralaToken() {
   const data = await res.json();
 
   if (!res.ok || !data.access_token) {
-    throw new Error("Failed to obtain Prokerala access token");
+    throw new Error("Failed to obtain Prokerala token");
   }
 
   cachedToken = data.access_token;
@@ -48,11 +43,8 @@ async function getProkeralaToken() {
   return cachedToken;
 }
 
-/**
- * =====================================
- * Calculate Current Vimshottari Dasha
- * =====================================
- */
+/* ================= MAIN FUNCTION ================= */
+
 export async function calculateCurrentDasha(dob, tob, lat, lon) {
   const token = await getProkeralaToken();
 
@@ -62,73 +54,40 @@ export async function calculateCurrentDasha(dob, tob, lat, lon) {
     "https://api.prokerala.com/v2/astrology/vimshottari-dasha" +
     `?datetime=${encodeURIComponent(datetime)}` +
     `&latitude=${lat}` +
-    `&longitude=${lon}`;
+    `&longitude=${lon}` +
+    `&ayanamsa=1`; // Lahiri
 
   const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
+    headers: { Authorization: `Bearer ${token}` }
   });
 
   const json = await res.json();
 
-  /**
-   * ===============================
-   * Robust response extraction
-   * (handles all Prokerala variants)
-   * ===============================
-   */
+  const periods = json?.data?.periods;
 
-  let current = null;
-
-  // Most common
-  if (json?.data?.dasha?.current) {
-    current = json.data.dasha.current;
+  if (!Array.isArray(periods) || periods.length === 0) {
+    console.error("Prokerala raw response:", JSON.stringify(json, null, 2));
+    throw new Error("No Vimshottari periods returned by Prokerala");
   }
 
-  // Alternative formats
-  else if (json?.data?.current) {
-    current = json.data.current;
-  }
+  const today = new Date();
 
-  else if (json?.data?.periods && Array.isArray(json.data.periods)) {
-    current = json.data.periods[0];
-  }
+  // ✅ Find CURRENT dasha by date
+  const current = periods.find(p => {
+    const start = new Date(p.start);
+    const end = new Date(p.end);
+    return today >= start && today <= end;
+  });
 
   if (!current) {
-    console.error("Unexpected Prokerala response:", JSON.stringify(json, null, 2));
-    throw new Error("Unable to parse current dasha from Prokerala response");
-  }
-
-  /**
-   * ===============================
-   * Normalize output
-   * ===============================
-   */
-  const mahadasha =
-    current.mahadasha?.name ||
-    current.mahadasha ||
-    current.major?.name;
-
-  const antardasha =
-    current.antardasha?.name ||
-    current.antardasha ||
-    current.sub?.name;
-
-  const antardashaEnd =
-    current.antardasha?.end ||
-    current.antardasha_end ||
-    current.end;
-
-  if (!mahadasha || !antardasha) {
-    throw new Error("Incomplete dasha data received from Prokerala");
+    throw new Error("Unable to determine current dasha from periods");
   }
 
   return {
     success: true,
     source: "prokerala",
-    mahadasha,
-    antardasha,
-    antardasha_end_date: antardashaEnd || null
+    mahadasha: current.mahadasha.name,
+    antardasha: current.antardasha.name,
+    antardasha_end_date: current.end
   };
 }
