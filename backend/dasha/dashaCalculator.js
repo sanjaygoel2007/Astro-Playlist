@@ -1,12 +1,19 @@
 // backend/dasha/dashaCalculator.js
 import fetch from "node-fetch";
 
+/**
+ * ===============================
+ * Prokerala OAuth Token Handling
+ * ===============================
+ */
+
 let cachedToken = null;
 let tokenExpiry = 0;
 
 async function getProkeralaToken() {
   const now = Date.now();
 
+  // reuse token if valid
   if (cachedToken && now < tokenExpiry) {
     return cachedToken;
   }
@@ -15,7 +22,7 @@ async function getProkeralaToken() {
   const clientSecret = process.env.PROKERALA_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error("Prokerala client id/secret missing");
+    throw new Error("PROKERALA_CLIENT_ID / PROKERALA_CLIENT_SECRET missing");
   }
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -32,7 +39,7 @@ async function getProkeralaToken() {
   const data = await res.json();
 
   if (!res.ok || !data.access_token) {
-    throw new Error("Failed to get Prokerala token");
+    throw new Error("Failed to obtain Prokerala access token");
   }
 
   cachedToken = data.access_token;
@@ -41,6 +48,11 @@ async function getProkeralaToken() {
   return cachedToken;
 }
 
+/**
+ * =====================================
+ * Calculate Current Vimshottari Dasha
+ * =====================================
+ */
 export async function calculateCurrentDasha(dob, tob, lat, lon) {
   const token = await getProkeralaToken();
 
@@ -60,17 +72,63 @@ export async function calculateCurrentDasha(dob, tob, lat, lon) {
 
   const json = await res.json();
 
-  const current = json?.data?.dasha?.current;
+  /**
+   * ===============================
+   * Robust response extraction
+   * (handles all Prokerala variants)
+   * ===============================
+   */
+
+  let current = null;
+
+  // Most common
+  if (json?.data?.dasha?.current) {
+    current = json.data.dasha.current;
+  }
+
+  // Alternative formats
+  else if (json?.data?.current) {
+    current = json.data.current;
+  }
+
+  else if (json?.data?.periods && Array.isArray(json.data.periods)) {
+    current = json.data.periods[0];
+  }
 
   if (!current) {
-    throw new Error("Invalid response from Prokerala");
+    console.error("Unexpected Prokerala response:", JSON.stringify(json, null, 2));
+    throw new Error("Unable to parse current dasha from Prokerala response");
+  }
+
+  /**
+   * ===============================
+   * Normalize output
+   * ===============================
+   */
+  const mahadasha =
+    current.mahadasha?.name ||
+    current.mahadasha ||
+    current.major?.name;
+
+  const antardasha =
+    current.antardasha?.name ||
+    current.antardasha ||
+    current.sub?.name;
+
+  const antardashaEnd =
+    current.antardasha?.end ||
+    current.antardasha_end ||
+    current.end;
+
+  if (!mahadasha || !antardasha) {
+    throw new Error("Incomplete dasha data received from Prokerala");
   }
 
   return {
     success: true,
     source: "prokerala",
-    mahadasha: current.mahadasha,
-    antardasha: current.antardasha,
-    antardasha_end_date: current.antardasha_end_date
+    mahadasha,
+    antardasha,
+    antardasha_end_date: antardashaEnd || null
   };
 }
