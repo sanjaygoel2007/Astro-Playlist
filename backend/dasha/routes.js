@@ -1,12 +1,16 @@
 import express from "express";
-import { calculateVimshottari } from "./vimshottari.js";
+import { calculateCurrentDasha } from "./vimshottari.js";
 
 const router = express.Router();
 
-/*
-URL:
- /dasha/current-dasha?dob=1965-02-18
-*/
+/**
+ * URL:
+ * /dasha/current-dasha?dob=YYYY-MM-DD
+ *
+ * NOTE:
+ * Moon longitude abhi hardcoded / manual hai.
+ * Team AstroSage se verify karke DB me correct kar sakti hai.
+ */
 
 router.get("/current-dasha", (req, res) => {
   const { dob } = req.query;
@@ -14,13 +18,21 @@ router.get("/current-dasha", (req, res) => {
   if (!dob) {
     return res.status(400).json({
       success: false,
-      error: "dob required (YYYY-MM-DD)"
+      error: "dob (YYYY-MM-DD) required"
     });
   }
 
   try {
-    const result = calculateVimshottari(dob);
-    return res.json({ success: true, ...result });
+    // 🔹 TEMP / MVP:
+    // AstroSage se manual reference
+    const moonLongitude = 298.6; // example, baad me DB se aayega
+
+    const result = calculateCurrentDasha(dob, moonLongitude);
+
+    return res.json({
+      success: true,
+      ...result
+    });
   } catch (e) {
     return res.status(500).json({
       success: false,
