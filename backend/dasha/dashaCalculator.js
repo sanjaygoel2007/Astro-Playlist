@@ -1,5 +1,5 @@
-// Accurate Vimshottari Dasha (Node Swiss Ephemeris compatible)
-// Node 16+ | type: module
+// backend/dasha/dashaCalculator.js
+// Accurate Vimshottari Dasha (Node-compatible, NO julday)
 
 import swisseph from "swisseph";
 
@@ -30,24 +30,37 @@ const NAKSHATRA_LORDS = [
 
 /* ================= Helpers ================= */
 
-function toJulian(dob, tob) {
-  const [y, m, d] = dob.split("-").map(Number);
-  const [hh, mm] = tob.split(":").map(Number);
+// Julian Day calculation (astronomy standard)
+function toJulianDay(date) {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day =
+    date.getUTCDate() +
+    date.getUTCHours() / 24 +
+    date.getUTCMinutes() / 1440 +
+    date.getUTCSeconds() / 86400;
 
-  // ✅ CORRECT Node Swiss Ephemeris function
-  return swisseph.swe_julday(
-    y,
-    m,
-    d,
-    hh + mm / 60,
-    swisseph.SE_GREG_CAL
+  let y = year;
+  let m = month;
+  if (m <= 2) {
+    y -= 1;
+    m += 12;
+  }
+
+  const A = Math.floor(y / 100);
+  const B = 2 - A + Math.floor(A / 4);
+
+  return (
+    Math.floor(365.25 * (y + 4716)) +
+    Math.floor(30.6001 * (m + 1)) +
+    day +
+    B -
+    1524.5
   );
 }
 
 function addYears(date, years) {
-  return new Date(
-    date.getTime() + years * 365.2422 * 24 * 3600 * 1000
-  );
+  return new Date(date.getTime() + years * 365.2422 * 24 * 3600 * 1000);
 }
 
 /* ================= MAIN FUNCTION ================= */
@@ -55,40 +68,31 @@ function addYears(date, years) {
 export function calculateCurrentDasha(dob, tob) {
   const now = new Date();
 
-  // Birth date in IST
   const birthDate = new Date(`${dob}T${tob}:00+05:30`);
+  const jd = toJulianDay(birthDate);
 
-  /* ---- Moon longitude (SIDEREAL – Lahiri default) ---- */
-  const jd = toJulian(dob, tob);
-
+  // Moon longitude (SIDEREAL – Lahiri)
   const moon = swisseph.calc_ut(
     jd,
     swisseph.SE_MOON,
-    swisseph.SEFLG_SIDEREAL | swisseph.SEFLG_SPEED
+    swisseph.SEFLG_SIDEREAL
   );
 
-  if (moon.error) {
-    throw new Error(moon.error);
-  }
+  if (moon.error) throw new Error(moon.error);
 
-  const moonLon = moon.longitude;
+  const moonLon = moon.longitude % 360;
 
-  /* ---- Nakshatra ---- */
+  // Nakshatra
   const nakSize = 360 / 27;
   const nakIndex = Math.floor(moonLon / nakSize);
   const nakLord = NAKSHATRA_LORDS[nakIndex];
 
-  const nakStart = nakIndex * nakSize;
-  const nakProgress = Math.min(
-    Math.max((moonLon - nakStart) / nakSize, 0),
-    1
-  );
+  const nakProgress = (moonLon % nakSize) / nakSize;
 
-  /* ---- Balance of Mahadasha at birth ---- */
+  // Balance Mahadasha at birth
   const mdTotalYears = DASHA_YEARS[nakLord];
   const mdBalanceYears = mdTotalYears * (1 - nakProgress);
 
-  /* ---- Find current Mahadasha ---- */
   let mdIndex = DASHA_ORDER.indexOf(nakLord);
   let currentMD = nakLord;
 
@@ -102,7 +106,7 @@ export function calculateCurrentDasha(dob, tob) {
     mdEnd = addYears(mdStart, DASHA_YEARS[currentMD]);
   }
 
-  /* ---- Antardasha ---- */
+  // Antardasha
   let adStart = mdStart;
   let currentAD = null;
   let adEnd = null;
