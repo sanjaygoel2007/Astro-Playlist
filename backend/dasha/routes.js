@@ -18,7 +18,7 @@ router.get("/current-dasha", (req, res) => {
   return res.json({
     success: true,
     ...result,
-    note: "Auto-generated result. May change after AstroSage verification."
+    note: "Auto result. End date may be corrected after AstroSage verification."
   });
 });
 
