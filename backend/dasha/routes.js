@@ -21,18 +21,19 @@ router.get("/current-dasha", (req, res) => {
 
   try {
     /**
-     * AUTO MODE (approximate but stable)
-     * Moon assumed at ~62% of its Nakshatra
-     * This avoids early-year results like 1979
+     * AUTO APPROX MODE (Stable Default)
+     * Moon assumed in Anuradha Nakshatra (Saturn)
+     * ~60–65% progress → Saturn–Venus around 2027–2028
      */
-    const ASSUMED_NAKSHATRA_PERCENT = 0.62;
-    const NAKSHATRA_LENGTH = 13 + 20 / 60;
 
-    // Saturn nakshatra (Anuradha) start ≈ 226°40'
-    const SATURN_NAK_START = 226 + 40 / 60;
+    const NAKSHATRA_LENGTH = 13 + 20 / 60; // 13°20'
+    const ASSUMED_NAKSHATRA_PERCENT = 0.62;
+
+    // ✅ CORRECT: Anuradha start (Saturn)
+    const ANURADHA_START = 213 + 20 / 60;
 
     const moonLongitude =
-      SATURN_NAK_START +
+      ANURADHA_START +
       ASSUMED_NAKSHATRA_PERCENT * NAKSHATRA_LENGTH;
 
     const result = calculateCurrentDasha(dob, moonLongitude);
