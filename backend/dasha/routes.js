@@ -9,7 +9,7 @@ router.get("/current-dasha", (req, res) => {
   if (!dob) {
     return res.status(400).json({
       success: false,
-      error: "dob required"
+      error: "dob (YYYY-MM-DD) required"
     });
   }
 
@@ -18,7 +18,7 @@ router.get("/current-dasha", (req, res) => {
   return res.json({
     success: true,
     ...result,
-    note: "Default result. Backend team may correct after AstroSage verification."
+    note: "Auto-generated result. May change after AstroSage verification."
   });
 });
 
