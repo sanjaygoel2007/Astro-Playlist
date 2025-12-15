@@ -1,18 +1,24 @@
 // backend/dasha/dashaCalculator.js
-// Accurate Vimshottari Dasha (Birth Nakshatra based)
+// Accurate Vimshottari Dasha (Sidereal – Lahiri)
 // Node 16+ | type: module
 
 import swisseph from "swisseph";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// ---------- Swiss Ephemeris setup ----------
+/* ================= Swiss Ephemeris setup ================= */
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-swisseph.set_ephe_path(__dirname); // ephemeris path
+// Set ephemeris path
+swisseph.set_ephe_path(__dirname);
 
-// ---------- Vimshottari order ----------
+// IMPORTANT: Set Lahiri Ayanamsa (Sidereal)
+swisseph.set_sid_mode(swisseph.SE_SIDM_LAHIRI, 0, 0);
+
+/* ================= Vimshottari constants ================= */
+
 const DASHA_ORDER = [
   "Ketu", "Venus", "Sun", "Moon", "Mars",
   "Rahu", "Jupiter", "Saturn", "Mercury"
@@ -30,14 +36,15 @@ const DASHA_YEARS = {
   Mercury: 17
 };
 
-// Nakshatra lords (27)
+// 27 Nakshatra lords
 const NAKSHATRA_LORDS = [
   "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
   "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
   "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury"
 ];
 
-// ---------- Helpers ----------
+/* ================= Helpers ================= */
+
 function toJulian(dob, tob) {
   const [y, m, d] = dob.split("-").map(Number);
   const [hh, mm] = tob.split(":").map(Number);
@@ -45,60 +52,71 @@ function toJulian(dob, tob) {
 }
 
 function addYears(date, years) {
-  const d = new Date(date);
-  d.setTime(d.getTime() + years * 365.2422 * 24 * 3600 * 1000);
-  return d;
+  return new Date(date.getTime() + years * 365.2422 * 24 * 3600 * 1000);
 }
 
-// ---------- MAIN FUNCTION ----------
+/* ================= MAIN FUNCTION ================= */
+
 export function calculateCurrentDasha(dob, tob) {
-  // ---- Moon longitude ----
+  const now = new Date();
+
+  /* ---- Birth date in IST ---- */
+  const birthDate = new Date(`${dob}T${tob}:00+05:30`);
+
+  /* ---- Moon longitude (SIDEREAL) ---- */
   const jd = toJulian(dob, tob);
 
-  const moon = swisseph.calc_ut(jd, swisseph.SE_MOON);
+  const moon = swisseph.calc_ut(
+    jd,
+    swisseph.SE_MOON,
+    swisseph.SEFLG_SIDEREAL
+  );
+
   if (moon.error) throw new Error(moon.error);
 
-  const moonLon = moon.longitude;
+  const moonLon = moon.longitude; // 0–360 sidereal
 
-  // ---- Nakshatra ----
-  const nakIndex = Math.floor(moonLon / (360 / 27));
+  /* ---- Nakshatra ---- */
+  const nakSize = 360 / 27;
+  const nakIndex = Math.floor(moonLon / nakSize); // 0–26
   const nakLord = NAKSHATRA_LORDS[nakIndex];
 
-  const nakStart = nakIndex * (360 / 27);
-  const nakProgress = (moonLon - nakStart) / (360 / 27);
+  const nakStart = nakIndex * nakSize;
+  const nakProgress = Math.min(
+    Math.max((moonLon - nakStart) / nakSize, 0),
+    1
+  );
 
-  // ---- Balance of Mahadasha at birth ----
-  const mdYears = DASHA_YEARS[nakLord];
-  const mdBalanceYears = mdYears * (1 - nakProgress);
+  /* ---- Balance of Mahadasha at birth ---- */
+  const mdTotalYears = DASHA_YEARS[nakLord];
+  const mdBalanceYears = mdTotalYears * (1 - nakProgress);
 
-  const birthDate = new Date(`${dob}T${tob}:00+05:30`);
-  let cursorDate = addYears(birthDate, mdBalanceYears);
-
-  // ---- Find current Mahadasha ----
+  /* ---- Find current Mahadasha correctly ---- */
   let mdIndex = DASHA_ORDER.indexOf(nakLord);
   let currentMD = nakLord;
 
-  while (cursorDate < new Date()) {
+  let mdStart = birthDate;
+  let mdEnd = addYears(mdStart, mdBalanceYears);
+
+  while (now >= mdEnd) {
     mdIndex = (mdIndex + 1) % 9;
     currentMD = DASHA_ORDER[mdIndex];
-    cursorDate = addYears(cursorDate, DASHA_YEARS[currentMD]);
+    mdStart = mdEnd;
+    mdEnd = addYears(mdStart, DASHA_YEARS[currentMD]);
   }
 
-  // ---- Antardasha ----
-  const mdStart = addYears(cursorDate, -DASHA_YEARS[currentMD]);
-  const mdDurationMs = DASHA_YEARS[currentMD] * 365.2422 * 24 * 3600 * 1000;
-
+  /* ---- Antardasha ---- */
   let adStart = mdStart;
   let currentAD = null;
   let adEnd = null;
 
   for (let i = 0; i < 9; i++) {
     const adLord = DASHA_ORDER[(mdIndex + i) % 9];
-    const adYears = (DASHA_YEARS[adLord] / 120) * DASHA_YEARS[currentMD];
-    const adMs = adYears * 365.2422 * 24 * 3600 * 1000;
-    const adFinish = new Date(adStart.getTime() + adMs);
+    const adYears =
+      (DASHA_YEARS[adLord] / 120) * DASHA_YEARS[currentMD];
+    const adFinish = addYears(adStart, adYears);
 
-    if (new Date() < adFinish) {
+    if (now < adFinish) {
       currentAD = adLord;
       adEnd = adFinish;
       break;
@@ -106,7 +124,10 @@ export function calculateCurrentDasha(dob, tob) {
     adStart = adFinish;
   }
 
+  /* ---- Final result ---- */
   return {
+    system: "Vimshottari",
+    ayanamsa: "Lahiri",
     birthNakshatra: nakIndex + 1,
     mahadasha: currentMD,
     antardasha: currentAD,
