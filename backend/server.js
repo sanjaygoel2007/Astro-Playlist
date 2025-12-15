@@ -1,6 +1,7 @@
 // backend/server.js
 // Requires: NODE 16+
 // Ensure env: DATABASE_URL, ASTRO_API_KEY (optional), ADMIN_SQL_KEY (optional), PORT (optional)
+import prokeralaTokenTest from "./test/prokeralaToken.js";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
