@@ -5,7 +5,7 @@ const router = express.Router();
 
 /*
 URL:
- /dasha/current-dasha?dob=1965-02-18&tob=14:52
+ /dasha/current-dasha?dob=1965-02-18
 */
 
 router.get("/current-dasha", (req, res) => {
