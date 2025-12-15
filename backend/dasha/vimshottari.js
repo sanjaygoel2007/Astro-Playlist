@@ -1,71 +1,107 @@
-// backend/dasha/vimshottari.js
-// KP / Prokerala-calibrated Vimshottari (Offline, Stable)
+/**
+ * Offline Vimshottari Dasha Calculator
+ * -----------------------------------
+ * Auto-calculation ke liye use karein.
+ * Manual AstroSage verification baad me DB se override ho sakta hai.
+ */
 
-const DASHAS = [
-  { lord: "Ketu", years: 7 },
-  { lord: "Venus", years: 20 },
-  { lord: "Sun", years: 6 },
-  { lord: "Moon", years: 10 },
-  { lord: "Mars", years: 7 },
-  { lord: "Rahu", years: 18 },
-  { lord: "Jupiter", years: 16 },
-  { lord: "Saturn", years: 19 },
-  { lord: "Mercury", years: 17 }
+const DASHA_ORDER = [
+  "Ketu",
+  "Venus",
+  "Sun",
+  "Moon",
+  "Mars",
+  "Rahu",
+  "Jupiter",
+  "Saturn",
+  "Mercury"
 ];
 
-// KP calibration factor (matches Prokerala / KP behaviour)
-const KP_BALANCE_FACTOR = 0.78;
+const DASHA_YEARS = {
+  Ketu: 7,
+  Venus: 20,
+  Sun: 6,
+  Moon: 10,
+  Mars: 7,
+  Rahu: 18,
+  Jupiter: 16,
+  Saturn: 19,
+  Mercury: 17
+};
 
-// Known Moon Nakshatra lord for this DOB
-const BIRTH_NAKSHATRA_LORD = "Saturn";
+const NAKSHATRA_LORDS = [
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
+  "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury"
+];
 
-export function calculateVimshottari(dobISO) {
-  const birthDate = new Date(dobISO);
-  const now = new Date();
+const NAKSHATRA_LENGTH = 13 + 20 / 60; // 13°20'
 
-  const mdIndex = DASHAS.findIndex(d => d.lord === BIRTH_NAKSHATRA_LORD);
-  const mahadasha = DASHAS[mdIndex];
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+  return d;
+}
 
-  // Adjusted Mahadasha length
-  const adjustedMDYears = mahadasha.years * KP_BALANCE_FACTOR;
+/**
+ * @param {string} dob - YYYY-MM-DD
+ * @param {number} moonLongitude - sidereal (Lahiri), 0–360
+ */
+export function calculateCurrentDasha(dob, moonLongitude) {
+  const birthDate = new Date(dob);
+  const today = new Date();
 
-  const mdStart = new Date(birthDate);
-  const mdEnd = new Date(mdStart);
-  mdEnd.setDate(mdEnd.getDate() + adjustedMDYears * 365.25);
+  // 1️⃣ Nakshatra
+  const nakIndex = Math.floor(moonLongitude / NAKSHATRA_LENGTH);
+  const nakLord = NAKSHATRA_LORDS[nakIndex];
 
-  let adStart = mdStart;
-  let foundAD = null;
-  let lastAD = null;
+  // 2️⃣ Balance of Mahadasha at birth
+  const nakStart = nakIndex * NAKSHATRA_LENGTH;
+  const travelled = moonLongitude - nakStart;
+  const remainingFraction =
+    (NAKSHATRA_LENGTH - travelled) / NAKSHATRA_LENGTH;
 
-  for (let i = 0; i < DASHAS.length; i++) {
-    const ad = DASHAS[(mdIndex + i) % DASHAS.length];
+  let mdIndex = DASHA_ORDER.indexOf(nakLord);
+  let currentMD = nakLord;
 
-    const adYears =
-      (ad.years / 120) * mahadasha.years * KP_BALANCE_FACTOR;
+  let mdYearsRemaining =
+    DASHA_YEARS[nakLord] * remainingFraction;
 
-    const adEnd = new Date(adStart);
-    adEnd.setDate(adEnd.getDate() + adYears * 365.25);
+  let mdStart = new Date(birthDate);
+  let mdEnd = addDays(mdStart, mdYearsRemaining * 365.2422);
 
-    lastAD = {
-      lord: ad.lord,
-      endDate: adEnd.toISOString().split("T")[0]
-    };
-
-    if (now >= adStart && now <= adEnd) {
-      foundAD = lastAD;
-      break;
-    }
-
-    adStart = adEnd;
+  // 3️⃣ Find current Mahadasha
+  while (today > mdEnd) {
+    mdStart = mdEnd;
+    mdIndex = (mdIndex + 1) % DASHA_ORDER.length;
+    currentMD = DASHA_ORDER[mdIndex];
+    mdEnd = addDays(mdStart, DASHA_YEARS[currentMD] * 365.2422);
   }
 
-  // ✅ SAFE FALLBACK (never null)
-  const antardasha = foundAD || lastAD;
+  // 4️⃣ Antardasha
+  let adStart = mdStart;
+  let currentAD = null;
+  let adEnd = null;
+
+  for (let i = 0; i < DASHA_ORDER.length; i++) {
+    const adLord = DASHA_ORDER[(mdIndex + i) % DASHA_ORDER.length];
+    const adYears =
+      (DASHA_YEARS[adLord] / 120) * DASHA_YEARS[currentMD];
+
+    const adFinish = addDays(adStart, adYears * 365.2422);
+
+    if (today >= adStart && today <= adFinish) {
+      currentAD = adLord;
+      adEnd = adFinish;
+      break;
+    }
+    adStart = adFinish;
+  }
 
   return {
-    mahadasha: mahadasha.lord,
-    antardasha: antardasha.lord,
-    antardasha_end_date: antardasha.endDate,
-    system: "KP / Prokerala calibrated (offline)"
+    mahadasha: currentMD,
+    antardasha: currentAD,
+    antardasha_end_date: adEnd.toISOString().split("T")[0],
+    calculation_source: "offline-vimshottari"
   };
 }
