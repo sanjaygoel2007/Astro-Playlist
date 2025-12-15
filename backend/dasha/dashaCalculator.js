@@ -1,15 +1,13 @@
-import { getVimshottariDasha } from "../src/prokeralaService.js";
+const current = response.data?.data?.dasha?.current;
 
-export async function calculateCurrentDasha(dob, tob, lat, lon, tz = "Asia/Kolkata") {
-  if (!lat || !lon) {
-    throw new Error("Latitude and longitude required");
-  }
-
-  return await getVimshottariDasha({
-    dob,
-    tob,
-    lat,
-    lon,
-    tz
-  });
+if (!current) {
+  throw new Error("Invalid response from Prokerala API");
 }
+
+return {
+  success: true,
+  source: "api",
+  mahadasha: current.mahadasha,
+  antardasha: current.antardasha,
+  antardasha_end_date: current.antardasha_end_date
+};
