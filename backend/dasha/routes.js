@@ -1,5 +1,5 @@
 // backend/dasha/routes.js
-
+console.log("🚀 TEST-DASHA ROUTE HIT");
 import express from "express";
 import { calculateCurrentDasha } from "./dashaCalculator.js";
 
