@@ -22,7 +22,6 @@ const DASHA_YEARS = {
   Mercury: 17
 };
 
-// 27 Nakshatra lords
 const NAKSHATRA_LORDS = [
   "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
   "Ketu","Venus","Sun","Moon","Mars","Rahu","Jupiter","Saturn","Mercury",
@@ -34,12 +33,14 @@ const NAKSHATRA_LORDS = [
 function toJulian(dob, tob) {
   const [y, m, d] = dob.split("-").map(Number);
   const [hh, mm] = tob.split(":").map(Number);
-  return swisseph.julday(
+
+  // ✅ CORRECT Node Swiss Ephemeris function
+  return swisseph.swe_julday(
     y,
     m,
     d,
     hh + mm / 60,
-    swisseph.GREG_CAL
+    swisseph.SE_GREG_CAL
   );
 }
 
@@ -70,11 +71,11 @@ export function calculateCurrentDasha(dob, tob) {
     throw new Error(moon.error);
   }
 
-  const moonLon = moon.longitude; // 0–360 sidereal
+  const moonLon = moon.longitude;
 
   /* ---- Nakshatra ---- */
   const nakSize = 360 / 27;
-  const nakIndex = Math.floor(moonLon / nakSize); // 0–26
+  const nakIndex = Math.floor(moonLon / nakSize);
   const nakLord = NAKSHATRA_LORDS[nakIndex];
 
   const nakStart = nakIndex * nakSize;
@@ -121,7 +122,6 @@ export function calculateCurrentDasha(dob, tob) {
     adStart = adFinish;
   }
 
-  /* ---- Final Output ---- */
   return {
     system: "Vimshottari",
     ayanamsa: "Lahiri",
