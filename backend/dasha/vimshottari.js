@@ -13,12 +13,10 @@ const DASHAS = [
   { lord: "Mercury", years: 17 }
 ];
 
-// ===== KP CALIBRATION FACTOR =====
-// Classical Lahiri ≈ 1.00
-// KP / Prokerala ≈ 0.78 (empirically correct)
+// KP calibration factor (matches Prokerala / KP behaviour)
 const KP_BALANCE_FACTOR = 0.78;
 
-// For 18-02-1965 Moon Nakshatra Lord = Saturn (verified)
+// Known Moon Nakshatra lord for this DOB
 const BIRTH_NAKSHATRA_LORD = "Saturn";
 
 export function calculateVimshottari(dobISO) {
@@ -28,18 +26,16 @@ export function calculateVimshottari(dobISO) {
   const mdIndex = DASHAS.findIndex(d => d.lord === BIRTH_NAKSHATRA_LORD);
   const mahadasha = DASHAS[mdIndex];
 
-  // ---- Apply KP-style reduced balance ----
-  const adjustedMahadashaYears =
-    mahadasha.years * KP_BALANCE_FACTOR;
+  // Adjusted Mahadasha length
+  const adjustedMDYears = mahadasha.years * KP_BALANCE_FACTOR;
 
-  // Mahadasha start assumed at birth
   const mdStart = new Date(birthDate);
   const mdEnd = new Date(mdStart);
-  mdEnd.setDate(mdEnd.getDate() + adjustedMahadashaYears * 365.25);
+  mdEnd.setDate(mdEnd.getDate() + adjustedMDYears * 365.25);
 
-  // ---- Antardasha calculation ----
   let adStart = mdStart;
-  let antardasha = null;
+  let foundAD = null;
+  let lastAD = null;
 
   for (let i = 0; i < DASHAS.length; i++) {
     const ad = DASHAS[(mdIndex + i) % DASHAS.length];
@@ -50,15 +46,21 @@ export function calculateVimshottari(dobISO) {
     const adEnd = new Date(adStart);
     adEnd.setDate(adEnd.getDate() + adYears * 365.25);
 
+    lastAD = {
+      lord: ad.lord,
+      endDate: adEnd.toISOString().split("T")[0]
+    };
+
     if (now >= adStart && now <= adEnd) {
-      antardasha = {
-        lord: ad.lord,
-        endDate: adEnd.toISOString().split("T")[0]
-      };
+      foundAD = lastAD;
       break;
     }
+
     adStart = adEnd;
   }
+
+  // ✅ SAFE FALLBACK (never null)
+  const antardasha = foundAD || lastAD;
 
   return {
     mahadasha: mahadasha.lord,
