@@ -1,36 +1,28 @@
-// backend/dasha/routes.js
 import express from "express";
-import { calculateCurrentDasha } from "./dashaCalculator.js";
+import { calculateVimshottari } from "./vimshottari.js";
 
 const router = express.Router();
 
-/**
- * URL:
- * /dasha/current-dasha?dob=YYYY-MM-DD&tob=HH:mm&lat=..&lon=..&tz=Asia/Kolkata
- */
-router.get("/current-dasha", async (req, res) => {
-  const { dob, tob, lat, lon, tz } = req.query;
+/*
+URL:
+ /dasha/current-dasha?dob=1965-02-18&tob=14:52
+*/
 
-  if (!dob || !tob || !lat || !lon) {
+router.get("/current-dasha", (req, res) => {
+  const { dob } = req.query;
+
+  if (!dob) {
     return res.status(400).json({
       success: false,
-      error: "dob, tob, lat and lon are required"
+      error: "dob required (YYYY-MM-DD)"
     });
   }
 
   try {
-    const result = await calculateCurrentDasha(
-      dob,
-      tob,
-      parseFloat(lat),
-      parseFloat(lon),
-      tz || "Asia/Kolkata"
-    );
-
-    res.json(result);
+    const result = calculateVimshottari(dob);
+    return res.json({ success: true, ...result });
   } catch (e) {
-    console.error("Dasha error:", e);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: e.message
     });
